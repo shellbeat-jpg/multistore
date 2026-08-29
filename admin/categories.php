@@ -384,16 +384,39 @@ if (USE_WYSIWYG == 'true') {
   // generate editor for categories
   if ($action == 'new_category' || $action == 'edit_category') {
     for ($i = 0, $n = sizeof($languages); $i < $n; $i++) {
-      echo xtc_wysiwyg('categories_description', $_SESSION['language_code'], $languages[$i]['id']);
-      echo xtc_wysiwyg('categories_short_description', $_SESSION['language_code'], $languages[$i]['id']);
+		# MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true' && defined('MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_STATUS') && MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_STATUS == 'true'){
+		  	for ($dom = 0; $dom < sizeof($arrDomainLang); $dom++) {
+				 $id_domain_wysiwyg = $arrDomainLang[$dom]['id_domain'];
+				 for ($i = 0, $n = sizeof($arrDomainLang[$dom]['id_lang']); $i < $n; $i++) {
+					echo xtc_wysiwyg('categories_description', $_SESSION['language_code'], $arrDomainLang[$dom]['id_lang'][$i]);
+					echo xtc_wysiwyg('categories_short_description', $_SESSION['language_code'], $arrDomainLang[$dom]['id_lang'][$i]);
+				 }
+			}
+		} else {
+		      echo xtc_wysiwyg('categories_description', $_SESSION['language_code'], $languages[$i]['id']);
+		      echo xtc_wysiwyg('categories_short_description', $_SESSION['language_code'], $languages[$i]['id']);
+		   			
+		}	   
     }
   }
   // generate editor for products
   if ($action == 'new_product' || $action == 'new_product_preview') {
-    for ($i = 0, $n = sizeof($languages); $i < $n; $i++) {
-      echo xtc_wysiwyg('products_description', $_SESSION['language_code'], $languages[$i]['id']);
-      echo xtc_wysiwyg('products_short_description', $_SESSION['language_code'], $languages[$i]['id']);
-    }
+    # MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true' && defined('MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_STATUS') && MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_STATUS == 'true'){
+		  for ($dom = 0; $dom < sizeof($arrDomainLang); $dom++) {
+				  $id_domain_wysiwyg = $arrDomainLang[$dom]['id_domain'];
+				  for ($i = 0, $n = sizeof($arrDomainLang[$dom]['id_lang']); $i < $n; $i++) {
+							echo xtc_wysiwyg('products_description', $data['code'], $arrDomainLang[$dom]['id_lang'][$i]);
+							echo xtc_wysiwyg('products_short_description', $data['code'], $arrDomainLang[$dom]['id_lang'][$i]);
+					}
+			}
+		} else {
+		  for ($i = 0, $n = sizeof($languages); $i < $n; $i++) {
+			echo xtc_wysiwyg('products_description', $_SESSION['language_code'], $languages[$i]['id']);
+			echo xtc_wysiwyg('products_short_description', $_SESSION['language_code'], $languages[$i]['id']);
+		  }
+		}  
   }
 }
 ?>

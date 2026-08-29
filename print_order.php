@@ -59,6 +59,9 @@ if ($customer_id > 0
   $smarty->assign('language', $order->info['language']);  
 
   $smarty->assign('oID', $oID);
+  # MODULE MULTISTORE           
+  $smarty->assign('oID', MULTISTORE=='true'?ms_build_order_id($order_check):$oID);
+  
   $smarty->assign('COMMENT', $order->info['comments']);
   $smarty->assign('DATE', xtc_date_long($order->info['date_purchased']));
   $smarty->assign('SHIPPING_CLASS', $order->info['shipping_class']);

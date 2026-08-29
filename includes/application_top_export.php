@@ -31,6 +31,11 @@ defined('PAGE_PARSE_START_TIME') OR define('PAGE_PARSE_START_TIME', microtime(tr
 @ini_set('display_errors', false);
 error_reporting(0);
 
+# MODULE MULTISTORE
+if (file_exists('includes/extra/multistore/multistore_preconfig.inc.php')) {
+  include_once ('includes/extra/multistore/multistore_preconfig.inc.php');
+}
+
 // Set the local configuration parameters - mainly for developers - if exists else the mainconfigure
 if (file_exists(dirname(__FILE__).'/local/configure.php')) {
   include_once(dirname(__FILE__).'/local/configure.php');
@@ -102,10 +107,14 @@ xtc_db_connect() or die('Unable to connect to database server!');
 foreach(auto_include(DIR_FS_CATALOG.'includes/extra/functions/','php') as $file) require_once ($file);
 
 // load configuration
-$configuration_query = xtc_db_query("SELECT configuration_key, configuration_value FROM ".TABLE_CONFIGURATION);
+# MODULE MULTISTORE - Multistore Modus als 1. Konstante setzen
+$configuration_query = xtc_db_query("SELECT configuration_key, configuration_value FROM ".TABLE_CONFIGURATION . ' order by configuration_id');
+
 while ($configuration = xtc_db_fetch_array($configuration_query)) {
   $configuration = xtc_db_data($configuration);
-  defined($configuration['configuration_key']) OR define($configuration['configuration_key'], stripslashes($configuration['configuration_value']));
+  # MODULE MULTISTORE > Key / Value ?
+  if (MULTISTORE!='true' || $configuration['configuration_key'] == 'MULTISTORE')
+    defined($configuration['configuration_key']) OR define($configuration['configuration_key'], stripslashes($configuration['configuration_value']));
 }
 
 foreach(auto_include(DIR_FS_CATALOG.'includes/extra/application_top_export/application_top_export_begin/','php') as $file) require ($file);

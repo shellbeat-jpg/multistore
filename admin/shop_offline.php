@@ -34,6 +34,15 @@
     xtc_db_query("UPDATE ". "shop_configuration" ." SET configuration_value= '" . xtc_db_input(xtc_db_prepare_input($_POST['shop_offline'])). "' WHERE configuration_key = 'SHOP_OFFLINE'");
     xtc_db_query("UPDATE ". "shop_configuration" ." SET configuration_value= '" . xtc_db_input(xtc_db_prepare_input($_POST['offline_msg'])) . "' WHERE configuration_key = 'SHOP_OFFLINE_MSG'");
     
+    # MODULE MULTISTORE
+  	if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+  		 $arrDomains = $_POST['string_domains'];
+  		if(is_array($arrDomains))
+           	$string_domains = join(";", $arrDomains);
+        $string_domains .= ";";
+  		xtc_db_query("UPDATE ". "shop_configuration" ." SET configuration_value= '$string_domains' WHERE configuration_key = 'STRING_DOMAINS'");
+  	}
+	  
     // set allowed c.groups
     $group_ids='';
     if(isset($_POST['customers_groups'])) { 
@@ -114,6 +123,27 @@ if (USE_WYSIWYG == 'true') {
             echo draw_on_off_selection('shop_offline', $offline_status_array, ((xtc_get_shop_conf('SHOP_OFFLINE') == 'checked') ? true : false)).PHP_EOL;
             echo '</div>'.PHP_EOL;
             echo '</div>'.PHP_EOL;
+ 			# MODULE MULTISTORE
+			if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+                echo '<div style="margin: 10px 0 0">'.PHP_EOL;
+                echo TEXT_STORE_REC.PHP_EOL;  
+			    echo '<div style="margin: 10px 0 20px">'.PHP_EOL;
+				if(!$STRING_DOMAINS = xtc_get_shop_conf('STRING_DOMAINS')){
+      				xtc_db_query("INSERT INTO shop_configuration (configuration_key,configuration_value) VALUES ('STRING_DOMAINS',';')");
+      				$STRING_DOMAINS = xtc_get_shop_conf('STRING_DOMAINS');
+				} 
+				$arrDomains = explode(";", $STRING_DOMAINS);  
+				for ($i=0;$n=sizeof($domain_array),$i<$n;$i++) {
+					if ($domain_array[$i]['id'] > 0 && isset($arrDomains) &&  in_array($domain_array[$i]['id'], $arrDomains)) {
+						$checked='checked ';
+					} else {
+						$checked='';
+					}
+					echo '<input type="checkbox" name="string_domains[]" value="'.$domain_array[$i]['id'].'" '.$checked.'> '.$domain_array[$i]['text'].'<br />';
+				}
+                echo '</div>'.PHP_EOL;
+                echo '</div>'.PHP_EOL; 								
+			} 						
             ?>
             <?php echo SETTINGS_OFFLINE_MSG ?>:<br />
             <?php

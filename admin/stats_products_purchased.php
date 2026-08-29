@@ -103,6 +103,27 @@ require (DIR_WS_INCLUDES.'head.php');
         echo '</form>';
         ?>
       </div>
+     <?php 
+        # MODULE MULTISTORE
+        if (MULTISTORE=='true') { 
+        ?>
+          <div class="main pdg2 flt-l" style="float: right;margin: 0px;">&nbsp;&nbsp;
+              <?php echo $strMultistoreSelectbox; ?> 
+          </div>
+        <?php 
+        } # MODULE MULTISTORE
+        /*
+       	echo HEADING_TITLE; 
+        if (isset($_GET['action']) 
+            && $_GET['action'] == 'orders' 
+            && isset($_GET['pID']) 
+            && $_GET['pID'] != ''
+            )
+        {
+          echo ': '.xtc_get_products_name($_GET['pID']);
+        }
+    */
+        ?>
       <div class="main flt-r pdg2 mrg5" style="margin-left:20px;">
         <?php echo xtc_draw_form('search', FILENAME_STATS_PRODUCTS_PURCHASED, '', 'get'); ?>
         <?php echo TEXT_SEARCH_PRODUCTS . ' ' . xtc_draw_input_field('search', ((isset($_GET['search'])) ? $_GET['search'] : ''), 'size="24"'); ?>
@@ -170,7 +191,8 @@ require (DIR_WS_INCLUDES.'head.php');
                   $where = " AND (pd.products_name LIKE ('%".xtc_db_input($_GET['search'])."%')
                                  OR p.products_model LIKE ('%".xtc_db_input($_GET['search'])."%')) ";
                 }
-                $products_query_raw = "SELECT p.products_id,
+				# MODULE MULTISTORE
+                $products_query_raw = "SELECT " . (MULTISTORE=='true'? "DISTINCT ":"") ." p.products_id,
                                               p.products_model,  
                                               p.products_ordered,
                                               p.products_quantity,
@@ -183,7 +205,9 @@ require (DIR_WS_INCLUDES.'head.php');
                                          JOIN " . TABLE_PRODUCTS_TO_CATEGORIES . " p2c
                                               ON p2c.products_id = p.products_id
                                                  AND p2c.categories_id != '0'  
+                                      " . (MULTISTORE=='true'? MULTISTORE_SQL_SEARCH_JOIN2:"") ."  
                                         WHERE p.products_ordered > 0
+                                       " . (MULTISTORE=='true'? " $ms_default_select":"") ."
                                               ".$where."
                                      GROUP BY pd.products_id 
                                      ORDER BY p.products_ordered DESC, pd.products_name ASC";

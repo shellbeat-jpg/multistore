@@ -90,6 +90,13 @@
                 'customers_status_discount_attributes' => xtc_db_prepare_input($_POST['customers_status_discount_attributes']),
                 'customers_status_show_tax_total' => xtc_db_prepare_input($_POST['customers_status_show_tax_total'])
               );
+	          # MODULE MULTISTORE
+	          if(MS_MULTIGROUPS=='true'){
+	             $arrDomains = isset($_POST['string_domains'])?$_POST['string_domains']:array();
+                 $sql_data_array['string_domains'] = join(";", $arrDomains);
+	             if($sql_data_array['string_domains']=='0')
+	                $sql_data_array['string_domains']='';
+	          } # MODULE MULTISTORE     
             if ($action == 'insert') {
               if (!xtc_not_null($customers_status_id)) {
                 $next_id_query = xtc_db_query("SELECT MAX(customers_status_id) AS customers_status_id FROM " . TABLE_CUSTOMERS_STATUS . "");
@@ -260,6 +267,13 @@ if (xtc_not_null($action) && $action != 'delete') {
 }
 ?>
   <script type="text/javascript" src="includes/general.js"></script>
+<?php
+if(MS_MULTIGROUPS=='true'){
+?>
+  <script type="text/javascript" src="includes/extra/javascript/multistore.js"></script>
+<?php
+}
+?>
 </head>
 <body>
   <!-- header //-->
@@ -294,6 +308,14 @@ if (xtc_not_null($action) && $action != 'delete') {
                     <td class="dataTableHeadingContent"><?php echo 'icon'; ?></td>
                     <td class="dataTableHeadingContent"><?php echo 'user'; ?></td>
                     <td class="dataTableHeadingContent"><?php echo TABLE_HEADING_CUSTOMERS_STATUS; ?></td>
+                  <?php
+                  # MODULE MULTISTORE
+                  if(MS_MULTIGROUPS=='true'){
+                  ?>
+                    <td class="dataTableHeadingContent" align="center" width="200"><?php echo TABLE_HEADING_DOMAIN; ?></td>
+                  <?php
+                  }
+                  ?>
                     <td class="dataTableHeadingContent txta-c"><?php echo TABLE_HEADING_TAX_PRICE; ?></td>
                     <td class="dataTableHeadingContent txta-c" colspan="2"><?php echo TABLE_HEADING_DISCOUNT; ?></td>
                     <td class="dataTableHeadingContent"><?php echo TABLE_HEADING_CUSTOMERS_GRADUATED; ?></td>
@@ -322,6 +344,25 @@ if (xtc_not_null($action) && $action != 'delete') {
                       <td class="dataTableContent txta-c"><?php echo $customers_status['customers_status_image'] != '' ? xtc_image(DIR_WS_CATALOG.DIR_WS_ICONS . $customers_status['customers_status_image'] , IMAGE_ICON_INFO) : '&nbsp;'?></td>
                       <td class="dataTableContent txta-c"><?php echo xtc_get_status_users($customers_status['customers_status_id']);?></td>
                       <td class="dataTableContent"><?php echo $customers_status['customers_status_name'] . ($customers_status['customers_status_id'] == DEFAULT_CUSTOMERS_STATUS_ID ? ' (' . TEXT_DEFAULT . ')' : '') . ($customers_status['customers_status_public'] == '1' ? ', ' . CUSTOMERS_GROUP_PUBLIC : '');?></td>
+                    <?php
+                    # MODULE MULTISTORE
+                    if(MS_MULTIGROUPS=='true'){
+                    ?>
+                    <td class="dataTableContent txta-c"><?php             
+                        $selDomains = explode(";", $customers_status['string_domains']);
+                        if($customers_status['string_domains']=='' || $customers_status['string_domains']=='0'){
+                          echo TEXT_ALL;  
+                        } else{
+                          for ($j=0; $j<sizeof($selDomains); $j++) {
+                            if(isset($selDomains[$j]) && $selDomains[$j]>0){
+                              echo  xtc_get_store_name($selDomains[$j]);
+                              if($j<sizeof($selDomains)-1) echo "<br>";
+                            }
+                          }                                 
+                        }                    
+                    ?>
+                    </td>
+                    <?php } # MODULE MULTISTORE ?> 
                       <td class="dataTableContent txta-c"><?php echo $customers_status['customers_status_show_price'] == '1' ? ($customers_status['customers_status_show_price_tax'] == '1' ? TAX_YES : TAX_NO) : '---' ;?></td>
                       <td class="dataTableContent txta-c"><?php echo $customers_status['customers_status_discount'];?> %</td>
                       <td class="dataTableContent txta-c"><?php echo ($customers_status['customers_status_ot_discount_flag'] == 0 ? '<span class="colorRed">' : '<span>' ).$customers_status['customers_status_ot_discount'];?> %</span></td>
@@ -372,6 +413,16 @@ if (xtc_not_null($action) && $action != 'delete') {
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_NAME . $customers_status_inputs_string);
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_IMAGE . '<br />' . xtc_draw_file_field('customers_status_image') . ' (jpg,jpeg,jpe,gif,png,bmp,tiff,tif,bmp)');
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_PUBLIC_INTRO . '<br />' . ENTRY_CUSTOMERS_STATUS_PUBLIC . '<br />' . xtc_draw_pull_down_menu('customers_status_public', $customers_status_array, $cInfo->customers_status_public ));
+                # MODULE MULTISTORE
+                  if(MS_MULTIGROUPS=='true'){
+                    $arrDomains = explode(";", $cInfo->string_domains);
+                    $checkboxes_domains='';
+                    for ($i=0;$n=sizeof($domain_array),$i<$n;$i++) {
+                      $checked='';
+                      $checkboxes_domains .='<input type="checkbox" '.($i==0?'onChange="SwitchItems(\'status\', \'string_domains[]\')"':'').' name="string_domains[]" value="'.$domain_array[$i]['id'].'" '.$checked.'> '.$domain_array[$i]['text'].'<br />';
+                    }
+                    $contents[] = array('text' => '<br /><strong>' . TABLE_HEADING_DOMAIN . '</strong><br />' . $checkboxes_domains);
+                } # MODULE MULTISTORE
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_MIN_ORDER_INTRO . '<br />' . ENTRY_CUSTOMERS_STATUS_MIN_ORDER . '<br />' . xtc_draw_input_field('customers_status_min_order', $cInfo->customers_status_min_order ));
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_MAX_ORDER_INTRO . '<br />' . ENTRY_CUSTOMERS_STATUS_MAX_ORDER . '<br />' . xtc_draw_input_field('customers_status_max_order', $cInfo->customers_status_max_order ));
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_SHOW_PRICE_INTRO     . '<br />' . ENTRY_CUSTOMERS_STATUS_SHOW_PRICE . '<br />' . xtc_draw_pull_down_menu('customers_status_show_price', $customers_status_array, $cInfo->customers_status_show_price ));
@@ -410,6 +461,20 @@ if (xtc_not_null($action) && $action != 'delete') {
                 $contents[] = array('text' => '<br />' . xtc_image(DIR_WS_CATALOG.DIR_WS_ICONS . $cInfo->customers_status_image, $cInfo->customers_status_name) . '<br />' . DIR_WS_CATALOG.DIR_WS_ICONS . '<b>' . $cInfo->customers_status_image . '</b>'); 
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_IMAGE . '<br />' . xtc_draw_file_field('customers_status_image', $cInfo->customers_status_image) . ' (jpg,jpeg,jpe,gif,png,bmp,tiff,tif,bmp)');
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_PUBLIC_INTRO . '<br />' . ENTRY_CUSTOMERS_STATUS_PUBLIC . '<br />' . xtc_draw_pull_down_menu('customers_status_public', $customers_status_array, $cInfo->customers_status_public ));
+                # MODULE MULTISTORE
+                  if(MS_MULTIGROUPS=='true' && $cInfo->customers_status_id != '0'){
+                    $arrDomains = explode(";", $cInfo->string_domains);
+                    $checkboxes_domains='';
+                    for ($i=0;$n=sizeof($domain_array),$i<$n;$i++) {
+                      if ($domain_array[$i]['id'] > 0 && isset($arrDomains) &&  in_array($domain_array[$i]['id'], $arrDomains)) {
+                        $checked='checked ';
+                      } else {
+                        $checked='';
+                      }
+                      $checkboxes_domains .='<input type="checkbox" '.($i==0?'onChange="SwitchItems(\'status\', \'string_domains[]\')"':'').' name="string_domains[]" value="'.$domain_array[$i]['id'].'" '.$checked.'> '.$domain_array[$i]['text'].'<br />';
+                    }
+                    $contents[] = array('text' => '<br /><strong>' . TABLE_HEADING_DOMAIN . '</strong><br />' . $checkboxes_domains);
+                } # MODULE MULTISTORE
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_MIN_ORDER_INTRO . '<br />' . ENTRY_CUSTOMERS_STATUS_MIN_ORDER . '<br />' . xtc_draw_input_field('customers_status_min_order', $cInfo->customers_status_min_order ));
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_MAX_ORDER_INTRO . '<br />' . ENTRY_CUSTOMERS_STATUS_MAX_ORDER . '<br />' . xtc_draw_input_field('customers_status_max_order', $cInfo->customers_status_max_order ));
                 $contents[] = array('text' => '<br />' . TEXT_INFO_CUSTOMERS_STATUS_SHOW_PRICE_INTRO     . '<br />' . ENTRY_CUSTOMERS_STATUS_SHOW_PRICE . '<br />' . xtc_draw_pull_down_menu('customers_status_show_price', $customers_status_array, $cInfo->customers_status_show_price ));

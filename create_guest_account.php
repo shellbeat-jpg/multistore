@@ -281,6 +281,10 @@ if (isset($_POST['action']) && ($_POST['action'] == 'process')) {
 
     foreach(auto_include(DIR_FS_CATALOG.'includes/extra/account/create_account_customer_data','php') as $file) require ($file);
 
+    # MODULE MULTISTORE
+    if(defined("MULTISTORE") &&  MULTISTORE=='true')
+		$sql_data_array['id_domain'] = ID_DOMAIN;
+		
     xtc_db_perform(TABLE_CUSTOMERS, $sql_data_array);
 
     $_SESSION['customer_id'] = xtc_db_insert_id();

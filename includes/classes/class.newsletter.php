@@ -216,6 +216,10 @@ class newsletter {
               'date_added' => 'now()',
               'ip_date_added' => ip_clearing($_SESSION['tracking']['ip'])
             );
+            # MODULE MULTISTORE
+        		if(defined("MULTISTORE") &&  MULTISTORE=='true')
+        			$sql_data_array['id_domain'] = ID_DOMAIN; 
+        	
             xtc_db_perform(TABLE_NEWSLETTER_RECIPIENTS, $sql_data_array);
 
             $this->message = TEXT_EMAIL_INPUT;

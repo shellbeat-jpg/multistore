@@ -32,7 +32,11 @@
     case 'save':
       $id = xtc_db_prepare_input((int)$_POST['ID']);
       $customers_status = xtc_get_customers_statuses();
-
+	  # MODULE MULTISTORE
+	  if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+		  $arrDomains = $_POST['string_domains'];
+          $string_domains = join(";", $arrDomains);
+	  }
       $title = xtc_db_prepare_input($_POST['title']);
       if ($title == '') $title = 'no title';
       $cc = xtc_db_prepare_input($_POST['cc']);
@@ -60,6 +64,9 @@
           'date' => 'now()',
           'body' => $newsletter_body
         );
+        # MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true')
+			$sql_data_array['string_domains']=$string_domains;
 
         if ($id != 0) {
            xtc_db_perform(TABLE_MODULE_NEWSLETTER, $sql_data_array, 'update', "newsletter_id = '" . $id . "'");
@@ -83,12 +90,71 @@
                         comment varchar(64) NOT NULL default '',
                         PRIMARY KEY (id)
                       )");
-
+		# MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+	        xtc_db_query("ALTER TABLE `module_newsletter_temp_".$id."` ADD `domain_http_adress` VARCHAR( 64 ) NOT NULL");
+	    	xtc_db_query("ALTER TABLE `module_newsletter_temp_".$id."` ADD `domain_email_adress` VARCHAR( 64 ) NOT NULL");
+			xtc_db_query("ALTER TABLE `module_newsletter_temp_".$id."` ADD `domain_email_name` VARCHAR( 64 ) NOT NULL");
+		}
         // filling temp table with data!
         $flag = '';
         if (!strpos($rzp,'all')) $flag = 'true';
         $rzp = str_replace(',all', '', $rzp);
         $groups = explode(',', $rzp);
+		# MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+			
+            # shopspezifische Erfassung
+        	for ($j=0; $j<sizeof($arrDomains); $j++) {
+        		$id_domain =$arrDomains[$j];
+        		if($id_domain>0){
+        			/*  Laden der shopspezifischen Einstellungen zur weiteren Verwendung (den Konstanten werden im Folgendem ein $ vorrangesetzt) */
+        	    	$EMAIL_SUPPORT_NAME = getMultistoreConfigValue('EMAIL_SUPPORT_NAME', $id_domain);
+        			$EMAIL_SUPPORT_ADDRESS = getMultistoreConfigValue('EMAIL_SUPPORT_ADDRESS', $id_domain);
+        			/*  Shop-URL der Anmeldung */
+        			$HTTP_SERVER =  xtc_get_domain_server($id_domain, 'http');
+         
+                    for ($i=0,$n=count($groups); $i<$n; $i++) {
+                      // check if customer wants newsletter
+                      if (isset($_POST['status_all']) && $_POST['status_all'] == 'yes') {
+                        $customers_query = xtc_db_query("SELECT customers_id,
+                                                                customers_firstname,
+                                                                customers_lastname,
+                                                                customers_email_address
+                                                           FROM ".TABLE_CUSTOMERS."
+                                                          WHERE customers_status='".$groups[$i]."' and id_domain = '$id_domain'");
+                      } else {
+                        $customers_query = xtc_db_query("SELECT customers_email_address,
+                                                                customers_id,
+                                                                customers_firstname,
+                                                                customers_lastname,
+                                                                mail_key
+                                                           FROM ".TABLE_NEWSLETTER_RECIPIENTS."
+                                                          WHERE customers_status='".$groups[$i]."' 
+                                                            AND mail_status='1' and id_domain = '$id_domain'");
+                      }
+                      while ($customers_data=xtc_db_fetch_array($customers_query)) {
+                        $sql_data_array = array(
+                          'customers_id' => $customers_data['customers_id'],
+                          'customers_status' => $groups[$i],
+                          'customers_firstname' => $customers_data['customers_firstname'],
+                          'customers_lastname' => $customers_data['customers_lastname'],
+                          'customers_email_address' => $customers_data['customers_email_address'],
+                          'mail_key' => $customers_data['mail_key'],
+                          'date' => 'now()'
+                        );
+                        $sql_data_array['domain_http_adress'] = $HTTP_SERVER;
+                        $sql_data_array['domain_email_adress'] = $EMAIL_SUPPORT_ADDRESS;
+                        $sql_data_array['domain_email_name'] = $EMAIL_SUPPORT_NAME;
+
+                        xtc_db_perform('module_newsletter_temp_'.$id, $sql_data_array);
+                      }
+                    }	
+        		} # MODULE MULTISTORE
+        	} # MODULE MULTISTORE         
+  
+		}else{
+        
 
         for ($i=0,$n=count($groups); $i<$n; $i++) {
           // check if customer wants newsletter
@@ -123,6 +189,10 @@
             xtc_db_perform('module_newsletter_temp_'.$id, $sql_data_array);
           }
         }
+            
+            		
+		}
+
         xtc_redirect(xtc_href_link(FILENAME_MODULE_NEWSLETTER, 'ID='.$id));
       }
       break;
@@ -161,6 +231,12 @@
         'email' => $email_query_data['customers_email_address'],
         'key' => $email_query_data['mail_key']
       );
+		# MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+			$email_data[count($email_data)-1]['domain_http_adress']=$email_query_data['domain_http_adress'];
+			$email_data[count($email_data)-1]['domain_email_adress']=$email_query_data['domain_email_adress'];
+			$email_data[count($email_data)-1]['domain_email_name']=$email_query_data['domain_email_name'];
+		}
     }
 
     $break = 0;
@@ -181,6 +257,25 @@
     
     for ($i=1; $i<=NEWSLETTER_EXECUTE_LIMIT; $i++) {
       if (!empty($email_data[$i-1])) {
+		# MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+            $remove_link = $email_data[$i-1]['domain_http_adress'].DIR_WS_CATALOG.FILENAME_CATALOG_NEWSLETTER.'?action=remove&email='.$email_data[$i-1]['email'].'&key='.$email_data[$i-1]['key']
+        	$link1 = chr(13).chr(10).chr(13).chr(10).TEXT_NEWSLETTER_REMOVE.chr(13).chr(10).chr(13).chr(10).$remove_link;
+        	$link2 = '<br /><br /><hr>'.TEXT_NEWSLETTER_REMOVE.'<br /><a href="'.$remove_link.'">' . TEXT_REMOVE_LINK . '</a>';
+ 
+			xtc_php_mail($email_data[$i-1]['domain_email_adress'],
+	               $email_data[$i-1]['domain_email_name'],
+	               $email_data[$i-1]['email'] ,
+	               $email_data[$i-1]['lastname'] . ' ' . $email_data[$i-1]['firstname'] ,
+	               '',
+	               $email_data[$i-1]['domain_email_adress'],
+	               $email_data[$i-1]['domain_email_name'],
+	                '',
+	                '',
+	                $newsletters_data['title'],
+	                $newsletters_data['body'].$link2,
+	                $newsletters_data['body'].$link1);
+		}else{
         $remove_link = $newsletter->RemoveLinkAdmin($email_data[$i-1]['key'], $email_data[$i-1]['email']);
         
         $link1 = chr(13).chr(10).chr(13).chr(10).TEXT_NEWSLETTER_REMOVE.chr(13).chr(10).chr(13).chr(10).$remove_link;
@@ -199,6 +294,8 @@
                      $newsletters_data['body'].$link2,
                      $newsletters_data['body'].$link1
                      );
+		}
+
                      
         xtc_db_query("UPDATE module_newsletter_temp_".(int)$_GET['ID']." SET comment='send' WHERE id='".$email_data[$i-1]['id']."'");
       }
@@ -280,12 +377,30 @@
                                             WHERE mail_status='1'
                                               AND customers_status='".$customer_group_data['customers_status_id']."'");
               $group_data = xtc_db_fetch_array($group_query);
+	          # MODULE MULTISTORE
+			  if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+				   $countDomain=array();
+				   for ($i=0;$n=sizeof($domain_array),$i<$n;$i++) {
+						if ($domain_array[$i]['id'] > 0) {
+				     		$ms_group_query=xtc_db_query("SELECT count(*) as count
+				                                FROM ".TABLE_NEWSLETTER_RECIPIENTS."
+				                                WHERE mail_status='1' and
+				                                customers_status='".$customer_group_data['customers_status_id']."' and id_domain = '".$domain_array[$i]['id']."'");
+				     		$ms_group_data=xtc_db_fetch_array($ms_group_query);
+				     		$countDomain[$domain_array[$i]['id']]=$ms_group_data['count'];
+						}
+					}
+			  }  
               $customer_group[] = array(
                 'ID' => $customer_group_data['customers_status_id'],
                 'NAME' => $customer_group_data['customers_status_name'],
                 'IMAGE' => $customer_group_data['customers_status_image'],
                 'USERS' => $group_data['count']
               );
+			  # MODULE MULTISTORE
+		  	  if(defined("MULTISTORE") &&  MULTISTORE=='true')
+				$customer_group[count($customer_group)-1]['USERSINDOMAIN']=$countDomain;
+			
             }
             ?>
             <div style="margin: 10px 2px"><?php echo '<a class="button" href="'.xtc_href_link(FILENAME_MODULE_NEWSLETTER,'action=new').'">'.BUTTON_NEW_NEWSLETTER.'</a>'; ?></div>
@@ -294,6 +409,14 @@
                 <tr class="dataTableHeadingRow">
                   <td class="dataTableHeadingContent" style="width:15%" ><?php echo TITLE_CUSTOMERS; ?></td>
                   <td class="dataTableHeadingContent" style="width:70%" ><?php echo TITLE_STK; ?></td>
+					<?php
+					# MODULE MULTISTORE
+					if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+					?>
+					<td class="dataTableHeadingContent">Shopverteilung</td>
+					<?php
+					}
+					?>
                   <td class="dataTableHeadingContent txta-c" style="width:15%"><?php echo TITLE_ACTION; ?></td>
                 </tr>
                 <?php
@@ -302,6 +425,21 @@
                   <tr>
                     <td class="dataTableContent"><?php echo xtc_image(DIR_WS_CATALOG . DIR_WS_ICONS . $customer_group[$i]['IMAGE'], ''); ?><?php echo $customer_group[$i]['NAME']; ?></td>
                     <td class="dataTableContent"><?php echo $customer_group[$i]['USERS']; ?></td>
+					<?php
+					# MODULE MULTISTORE  
+					if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+					?>
+					<td class="dataTableContent txta-c" align="left"><?php
+					 for ($j=0;$nn=sizeof($domain_array),$j<$nn;$j++) {
+						if ($domain_array[$j]['id'] > 0) {
+								if($customer_group[$i]['USERSINDOMAIN'][$domain_array[$j]['id']]>0)
+                 echo xtc_get_store_name($domain_array[$j]['id']).": ".$customer_group[$i]['USERSINDOMAIN'][$domain_array[$j]['id']]. " <br>";
+						}
+					 }
+					?></td>
+					<?php
+					}  
+					?>
                     <td class="dataTableContent txta-c">&nbsp;</td>
                   </tr>
                   <?php
@@ -321,11 +459,23 @@
                 'date' => $newsletters_data['date'],
                 'title' => $newsletters_data['title']
               );
+			# MODULE MULTISTORE
+			if(defined("MULTISTORE") &&  MULTISTORE=='true')
+				$news_data[count($news_data)-1]['string_domains']=$newsletters_data['string_domains'];
+   
             }
             ?>
             <table class="tableBoxCenter collapse">
               <tr class="dataTableHeadingRow">
                 <td class="dataTableHeadingContent" style="width:15%"><?php echo TITLE_DATE; ?></td>
+				<?php
+				# MODULE MULTISTORE
+				if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+				?>
+				<td class="dataTableHeadingContent"><?php echo TEXT_STORE; ?></td>
+				<?php
+				} # MODULE MULTISTORE
+				?>
                 <td class="dataTableHeadingContent" style="width:70%"><?php echo TITLE_NOT_SEND; ?></td>
                 <td class="dataTableHeadingContent txta-c" style="width:15%"><?php echo TITLE_ACTION; ?></td>
               </tr>
@@ -335,6 +485,23 @@
                   ?>
                     <tr>
                       <td class="dataTableContent"><?php echo $news_data[$i]['date']; ?></td>
+						<?php
+						# MODULE MULTISTORE
+						if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+						?>
+							<td nowrap class="dataTableContent" style="border-bottom: 1px solid; border-color: #f1f1f1;" valign="middle" align="left"><?php
+							$arrDomains = explode(";", $news_data[$i]['string_domains']);
+							for ($j=0; $j<sizeof($arrDomains); $j++) {
+							 if($arrDomains[$j]>0){
+									echo xtc_get_store_name($arrDomains[$j]);
+									if($j<sizeof($arrDomains)-1) echo "<br>";
+							 }
+							}
+							?>
+							</td>
+						<?php
+						}  
+						?>
                       <td class="dataTableContent"><?php echo xtc_image(DIR_WS_CATALOG.'images/icons/arrow.gif'); ?>&nbsp;<a href="<?php echo xtc_href_link(FILENAME_MODULE_NEWSLETTER,'ID='.$news_data[$i]['id']); ?>"><b><?php echo $news_data[$i]['title']; ?></b></a></td>
                       <td class="dataTableContent txta-c">
                         <a href="<?php echo xtc_href_link(FILENAME_MODULE_NEWSLETTER,'action=edit&ID='.$news_data[$i]['id']); ?>">
@@ -371,6 +538,18 @@
                           }
 
                           echo TEXT_TO.$newsletters_data['bc'].'<br />';
+						# MODULE MULTISTORE
+						if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+							echo TEXT_STORE_REC;
+							$arrDomains = explode(";", $newsletters_data['string_domains']);
+							for ($j=0; $j<sizeof($arrDomains); $j++) {
+							 if($arrDomains[$j]>0){
+									echo xtc_get_store_name($arrDomains[$j]);
+									if($j<sizeof($arrDomains)-1) echo ", ";
+							 }
+							}
+							echo '<br />';
+						}  
                           echo TEXT_CC.$newsletters_data['cc'].'<br /><br />'.TEXT_PREVIEW;
                           echo '<table style="border: 1px solid #a3a3a3; width:100%"><tr><td>'.$newsletters_data['body'].'</td></tr></table>';
                         ?>
@@ -410,11 +589,23 @@
                     'date'=>$newsletters_data['date'],
                     'title'=>$newsletters_data['title']
                   );
+				  # MODULE MULTISTORE
+				  if(defined("MULTISTORE") &&  MULTISTORE=='true')
+					$news_data[count($news_data)-1]['string_domains']=$newsletters_data['string_domains'];
+
                 }
                 ?>
                 <table class="tableBoxCenter collapse">
                   <tr class="dataTableHeadingRow">
                     <td class="dataTableHeadingContent" style="width:85%"><?php echo TITLE_SEND; ?></td>
+					<?php
+					# MODULE MULTISTORE
+					if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+						?>
+						<td class="dataTableHeadingContent"><?php echo TEXT_STORE ; ?></td>
+						<?php
+					}  
+					?>
                     <td class="dataTableHeadingContent txta-c" style="width:15%"><?php echo TITLE_ACTION; ?></td>
                   </tr>
                   <?php
@@ -423,6 +614,23 @@
                       ?>
                         <tr>
                           <td class="dataTableContent" style="border-bottom: 1px solid; border-color: #f1f1f1;"><?php echo $news_data[$i]['date'].'    '; ?><b><?php echo $news_data[$i]['title']; ?></b></td>
+						<?php
+						# MODULE MULTISTORE
+						if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+						?>
+						 <td class="dataTableContent txta-c" style="border-bottom: 1px solid; border-color: #f1f1f1;" valign="middle" align="left"><?php
+							$arrDomains = explode(";", $news_data[$i]['string_domains']);
+							 
+							for ($j=0; $j<sizeof($arrDomains); $j++) {
+							 if($arrDomains[$j]>0){
+									echo xtc_get_store_name($arrDomains[$j]);
+									if($j<sizeof($arrDomains)-1) echo ", ";
+							 }
+							}  
+						  ?> </td>
+						<?php
+						}
+						?>    
                           <td class="dataTableContent txta-c" style="border-bottom: 1px solid; border-color: #f1f1f1;">
                             <a href="<?php echo xtc_href_link(FILENAME_MODULE_NEWSLETTER,'action=edit&ID='.$news_data[$i]['id']); ?>">
                             <?php echo xtc_image(DIR_WS_ICONS.'icon_edit.gif', ICON_EDIT,'','').'</a>&nbsp;'; ?>
@@ -454,6 +662,28 @@
                     <td class="dataTableConfig col-left"><?php echo TEXT_TITLE; ?></td>
                     <td class="dataTableConfig col-single-right"><?php echo xtc_draw_input_field('title', ((isset($newsletters_data)) ? $newsletters_data['title'] : ''), 'size=100'); ?></td>
                   </tr>
+					<?php
+					# MODULE MULTISTORE
+					if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+					?>
+						<tr>
+						<td class="dataTableConfig col-left"><?php echo  TEXT_STORE; ?>:</td>
+						<td class="dataTableConfig col-single-right"><?php
+						$arrDomains = explode(";", $newsletters_data['string_domains']);
+						for ($i=0;$n=sizeof($domain_array),$i<$n;$i++) {
+							if ($domain_array[$i]['id'] > 0 && isset($arrDomains) &&  in_array($domain_array[$i]['id'], $arrDomains)) {
+								$checked='checked ';
+							} else {
+								$checked='';
+							}
+							echo '<input type="checkbox" '.($i==0?'onChange="SwitchItems(\'edit_newsletter\', \'string_domains[]\')"':'').' name="string_domains[]" value="'.$domain_array[$i]['id'].'" '.$checked.'> '.$domain_array[$i]['text'].'<br />';
+						}
+						?></td>
+						</tr>
+					<?php
+					}  
+					?>
+                  
                   <tr>
                     <td class="dataTableConfig col-left"><?php echo TEXT_TO; ?></td>
                     <td class="dataTableConfig col-single-right">

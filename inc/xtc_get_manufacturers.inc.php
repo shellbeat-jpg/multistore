@@ -26,8 +26,8 @@
     if (!defined('RUN_MODE_ADMIN')) {
       $conditions .= " WHERE m.manufacturers_status = 1 ";
     }
-
-    $manufacturers_query = xtDBquery("SELECT *
+    # MODULE MULTISTORE
+    $manufacturers_query = xtDBquery(MULTISTORE=='true' ? MULTISTORE_SQL_MANUFACTURERS : "SELECT *
                                         FROM " . TABLE_MANUFACTURERS . " m
                                    LEFT JOIN " . TABLE_MANUFACTURERS_INFO . " mi
                                              ON m.manufacturers_id = mi.manufacturers_id

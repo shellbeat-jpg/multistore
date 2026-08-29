@@ -831,6 +831,10 @@ class shoppingCart {
               $products_array[$this->type][$index++] = $products_data;
             }
           }
+        # MODULE MULTISTORE
+        } elseif(defined("MULTISTORE") &&  MULTISTORE=='true') {
+          # Artikel anderer Shops nur aus der Session entfernen 
+          unset ($this->contents[$products_id]);
         }
       }
     }

@@ -39,6 +39,14 @@
     $configuration = get_shop_configuration();
     
     if (isset($configuration['SHOP_OFFLINE']) && $configuration['SHOP_OFFLINE'] == 'checked') {
+      # MODULE MULTISTORE
+    	if(defined("MULTISTORE") &&  MULTISTORE=='true') {
+      	$STRING_DOMAINS = xtc_get_shop_conf('STRING_DOMAINS');
+        if(strpos($STRING_DOMAINS, ID_DOMAIN . ";") === false) {
+           return false;
+      	}    	
+      } # MODULE MULTISTORE
+      
       $customers_status = ((basename($PHP_SELF) != FILENAME_LOGOFF && isset($_SESSION['customers_status'])) ? $_SESSION['customers_status']['customers_status'] : DEFAULT_CUSTOMERS_STATUS_ID_GUEST);
       //check for admins
       if ($customers_status == '0') {

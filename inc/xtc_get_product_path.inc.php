@@ -63,6 +63,7 @@ function xtc_get_product_path($products_id) {
   $add_select = ((defined('PRODUCTS_CANONICAL_CAT_ID') && PRODUCTS_CANONICAL_CAT_ID === true) ? "p.products_canonical_cat_id," : '');
   $order_by = ((defined('PRODUCTS_CANONICAL_CAT_ID') && PRODUCTS_CANONICAL_CAT_ID) ? "ORDER BY FIELD(p2c.categories_id, p.products_canonical_cat_id) DESC" : '');
   
+  # MODULE MULTISTORE
   $category_query = "SELECT ".$add_select."
                             p2c.categories_id
                        FROM " . TABLE_PRODUCTS . " p
@@ -76,6 +77,7 @@ function xtc_get_product_path($products_id) {
                                    ".CATEGORIES_CONDITIONS_C."
                       WHERE p.products_id = '" . (int)$products_id . "' 
                         AND p.products_status = 1 
+                            ".(MULTISTORE=='true'?MULTISTORE_SQL_SEARCH_WHERE2a:"")."
                             ".PRODUCTS_CONDITIONS_P."
                             ".$order_by."
                             ".$limit;

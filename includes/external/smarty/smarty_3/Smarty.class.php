@@ -36,6 +36,10 @@ define('MY_CURRENT_TEMPLATE', defined('CURRENT_TEMPLATE') ? CURRENT_TEMPLATE : '
 define('MY_TEMPLATE_PLUGINS', DIR_FS_CATALOG.'templates/'.MY_CURRENT_TEMPLATE.'/smarty/');
 define('MY_SHOP_PLUGINS', DIR_FS_EXTERNAL.'smarty/plugins/');
 
+# MUDULE MULTISTORE
+define('MULTISTORE', defined('MULTISTORE') ? MULTISTORE : false);
+
+
 /**
  * define smarty charset
  */
@@ -712,9 +716,9 @@ class Smarty extends Smarty_Compatibility
         // set default dirs
         $this->setTemplateDir(DIR_FS_CATALOG . 'templates' . DIRECTORY_SEPARATOR)
              ->addTemplateDir(DIR_FS_CATALOG . 'templates' . DIRECTORY_SEPARATOR . MY_CURRENT_TEMPLATE . DIRECTORY_SEPARATOR)
-             ->setCompileDir(DIR_FS_CATALOG . 'templates_c' . DIRECTORY_SEPARATOR)
+             ->setCompileDir(DIR_FS_CATALOG . 'templates_c' . (MULTISTORE=='true'?'/'.ID_DOMAIN:'') . DIRECTORY_SEPARATOR)
              ->setPluginsDir(SMARTY_PLUGINS_DIR)
-             ->setCacheDir(DIR_FS_CATALOG . 'cache' . DIRECTORY_SEPARATOR)
+             ->setCacheDir(DIR_FS_CATALOG . 'cache'  .  (MULTISTORE=='true'?'/'.ID_DOMAIN:'') . DIRECTORY_SEPARATOR)
              ->setConfigDir(DIR_FS_CATALOG . 'lang' . DIRECTORY_SEPARATOR)
              ->addConfigDir(DIR_FS_CATALOG . 'templates' . DIRECTORY_SEPARATOR . MY_CURRENT_TEMPLATE . DIRECTORY_SEPARATOR . 'lang' . DIRECTORY_SEPARATOR)
              ->addPluginsDir(MY_TEMPLATE_PLUGINS)

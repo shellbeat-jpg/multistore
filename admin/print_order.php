@@ -26,6 +26,8 @@
   $smarty->assign('store_name_address', STORE_NAME_ADDRESS); 
 
   // get order data
+  # MODULE MULTISTORE => # Order Klasse wird in getPreconfig() deklariert
+  if(!class_exists('order'))
   include(DIR_WS_CLASSES . 'order.php');
   $order = new order((int)$_GET['oID']);
 

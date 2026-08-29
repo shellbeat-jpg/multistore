@@ -190,6 +190,9 @@
                    nl2br($message), 
                    $message);
     }
+    # MODULE MULTISTORE
+    if($debugSql)
+    echo "$query<br />--- ERROR: $error<br /><br />";
     
     trigger_error($errno.' - '.$error.'<br/><br/>'.$query, E_USER_WARNING);
   }
@@ -237,6 +240,21 @@
   function xtc_db_query($query, $link='db_link') {
     global ${$link};
 
+    # MODULE MULTISTORE
+    $cmp_query = substr(strtolower(trim($query)), 0, 6);
+    if (defined('MULTISTORE')
+        && MULTISTORE == 'true'
+        && function_exists('ms_db_query')
+        && (!defined('RUN_MODE_ADMIN') || RUN_MODE_ADMIN !== true)
+        && $cmp_query != 'delete'
+        && $cmp_query != 'update'
+        && $cmp_query != 'insert'
+    ) {
+        global $debugSql, $echoSql;
+        $query = ms_db_query($query);
+    }
+
+
     if (defined('STORE_DB_TRANSACTIONS') && STORE_DB_TRANSACTIONS == 'true') {    
       $queryStartTime = microtime(true);
     }
@@ -250,8 +268,14 @@
       str_replace('insert into', 'REPLACE INTO', $query);
     }
     
-    try {
-      $result = mysqli_query(${$link}, $query);
+    try {       
+		# MODULE MULTISTORE
+	    # DB-Schreibschutz für Administratoren 
+	    if(($_SESSION['schreibschutz']==1) && (substr(strtolower($query), 0 , 6) == 'delete' || substr(strtolower($query), 0 , 6) == 'update' || substr(strtolower($query), 0 , 6) == 'insert') && substr($_SERVER['SCRIPT_NAME'], 0 , 7) == '/admin/') {
+	    }else{
+	        $result = mysqli_query(${$link}, $query);
+	    } 
+      
     } catch (Exception $ex) {
       xtc_db_error($query, mysqli_errno(${$link}), mysqli_error(${$link}));
       return false;

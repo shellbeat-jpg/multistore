@@ -122,6 +122,9 @@ if ($search_id != '') {
     xtc_redirect(xtc_href_link(FILENAME_ORDERS, 'action=edit&oID='.$orders_search['orders_id']));
   }
 }
+# MODULE MULTISTORE - Order Klasse wird in getPreconfig() vordeklariert
+if(!class_exists('order'))
+  require_once (DIR_WS_CLASSES.'order.php');
 
 if ($order_exists) {
   $order = new order($oID);

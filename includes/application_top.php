@@ -40,6 +40,11 @@ defined('PAGE_PARSE_START_TIME') OR define('PAGE_PARSE_START_TIME', microtime(tr
 @ini_set('display_errors', false);
 error_reporting(0);
 
+# MODULE MULTISTORE
+if (file_exists('includes/extra/multistore/multistore_preconfig.inc.php')) {
+  include_once ('includes/extra/multistore/multistore_preconfig.inc.php');
+}
+
 // configuration parameters
 if (file_exists('includes/local/configure.php')) {
   include_once ('includes/local/configure.php');
@@ -179,10 +184,13 @@ xtc_db_connect() or die('Unable to connect to database server!');
 foreach(auto_include(DIR_FS_CATALOG.'includes/extra/functions/','php') as $file) require_once ($file);
 
 // load configuration
-$configuration_query = xtc_db_query("SELECT configuration_key, configuration_value FROM ".TABLE_CONFIGURATION);
+# MODULE MULTISTORE - Multistore Modus als 1. Konstante setzen
+$configuration_query = xtc_db_query("SELECT configuration_key, configuration_value FROM ".TABLE_CONFIGURATION . ' order by configuration_id');
 while ($configuration = xtc_db_fetch_array($configuration_query)) {
   $configuration = xtc_db_data($configuration);
-  defined($configuration['configuration_key']) OR define($configuration['configuration_key'], stripslashes($configuration['configuration_value']));
+  # MODULE MULTISTORE 
+  if($configuration!='')
+  	defined($configuration['configuration_key']) OR define($configuration['configuration_key'], stripslashes($configuration['configuration_value']));
 }
 
 foreach(auto_include(DIR_FS_CATALOG.'includes/extra/application_top/application_top_begin/','php') as $file) require ($file);
@@ -219,7 +227,9 @@ if (GZIP_COMPRESSION == 'true' && $ext_zlib_loaded = extension_loaded('zlib')) {
 
 // set the top level domains
 $http_domain_arr = xtc_get_top_level_domain(HTTP_SERVER);
-$https_domain_arr = xtc_get_top_level_domain(HTTPS_SERVER);
+# MODULE MULTISTORE
+$https_domain_arr = xtc_get_top_level_domain((MULTISTORE=='true'?MS_HTTPS_SERVER:HTTPS_SERVER));
+
 $http_domain = $http_domain_arr['domain'];
 $https_domain = $https_domain_arr['domain'];
 $current_domain = (($request_type == 'NONSSL') ? $http_domain : $https_domain);
@@ -253,6 +263,10 @@ include_once (DIR_WS_INCLUDES.'tracking.php');
 // set the language
 include_once (DIR_WS_MODULES.'set_language_sessions.php');
 
+# MODULE MULTISTORE   
+if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+  include (DIR_FS_CATALOG.'includes/extra/application_top/application_top_begin/multistore.php'); 
+} 
 // language translations
 require_once (DIR_WS_LANGUAGES.$_SESSION['language'].'/'.$_SESSION['language'].'.php');
 

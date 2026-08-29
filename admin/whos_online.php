@@ -114,6 +114,17 @@
           </form>        
         </div>
           
+        <?php      
+        # MODULE MULTISTORE
+        if (MULTISTORE=='true') { 
+        ?>
+          <div class="main pdg2 flt-l" style="float: right;margin: 0px;">&nbsp;&nbsp;
+              <?php echo $strMultistoreSelectbox; ?> 
+          </div>
+        <?php 
+        }  
+        ?>
+         
         <table class="tableCenter">
           <tr>
             <td class="boxCenterLeft">
@@ -143,6 +154,12 @@
                     $where = " WHERE session_id LIKE 'BOT%'";
                     break;
                 }
+            	# MODULE MULTISTORE
+            	if(MULTISTORE=='true'){
+					$where .= str_replace("WHERE ", "AND ", $ms_default_select);
+              	}
+              } elseif(MULTISTORE=='true'){
+				$where = $ms_default_select;
               }
               $whos_online_query_raw = "SELECT customer_id,
                                                full_name,

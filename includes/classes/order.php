@@ -278,8 +278,17 @@
       }
     }
 
-    function getOrderData($oID) {
+    function getOrderData($oID, $id_domain = 0) {
       global $xtPrice, $PHP_SELF;
+
+      # MODULE MULTISTORE
+      $ms_sql = "";
+      if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+        if($id_domain == 0)
+           $id_domain = ID_DOMAIN;  
+        $ms_sql = sprintf(MULTISTORE_SQL_PSDESCRIPTION, $id_domain);       
+      } 
+
 
       require_once(DIR_FS_INC . 'xtc_get_attributes_model.inc.php');
       require_once(DIR_FS_INC . 'xtc_get_short_description.inc.php');
@@ -293,6 +302,7 @@
       $order_lang_array = xtc_db_fetch_array($order_lang_query, true);
       $order_lang_id = $order_lang_array['languages_id'];
 
+      # MODULE MULTISTORE
       $order_query = "SELECT op.*,
                              pd.products_description,
                              pd.products_short_description
@@ -300,7 +310,7 @@
                    LEFT JOIN ".TABLE_PRODUCTS_DESCRIPTION." pd
                              ON op.products_id = pd.products_id
                                 AND pd.language_id = '".(int)$order_lang_id."'
-                       WHERE op.orders_id='".(int)$oID."'";
+                       WHERE op.orders_id='".(int)$oID."' $ms_sql";
 
       $index = 0;
       $order_data = array ();

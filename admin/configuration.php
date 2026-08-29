@@ -38,7 +38,101 @@
     switch ($action) {
       case 'save':
         // update changed configurations
-        if ($_GET['gID'] != '6' && isset($_POST) && count($_POST) > 0) {
+        if (isset($_POST) && count($_POST) > 0) {
+			# MODULE MULTISTORE => Erweiterte Konfiguration - Zusatzmodule
+			if ($_GET['gID']=='17') {    
+				if(defined('MULTISTORE_LICENSE') && ((MULTISTORE=='true' && MULTISTORE != $_POST['MULTISTORE']))){
+                    # Zurücksetzen des Multistore-Modus
+					if(MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_STATUS=='true' && countMdItems(false) > 0){
+						# Zurücksetzen der Mehrfachbeschreibungen
+						minMdItems(); 
+					}
+					# Klassenerweiterungs-Module deinstallieren
+					xtc_db_query("delete from " . TABLE_CONFIGURATION . " where configuration_key LIKE 'MODULE_CATEGORIES_MULTISTORE2CATEGORIES_%'");
+					xtc_db_query("delete from " . TABLE_CONFIGURATION . " where configuration_key LIKE 'MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_%'");    				  
+					
+				} elseif(!constant('MULTISTORE_LICENSE') && MULTISTORE!='true'){
+					# Erstmaliges Aktivieren des Multistore-Modus: automatische Zuordnung von Content und Hauptkategorien zur Installationsdomain
+                                      
+                    define('TABLE_LANGUAGES_TO_DOMAINS', 'languages_to_domains');
+                    define('TABLE_CURRENCIES_TO_DOMAINS', 'currencies_to_domains');
+                    define('TABLE_ADMIN_ACCESS_DOMAINS', 'admin_access_domains');
+                    define('TABLE_ADMIN_ACCESS_LANGUAGES', 'admin_access_languages');
+                    define('TABLE_DOMAINS', 'domains');
+                    define('TABLE_DOMAINS_DESCRIPTION', 'domains_description');
+                    define('TABLE_DOMAINS_CONFIGURATION', 'domains_configuration');
+					
+                    $multistore_check_query = xtc_db_query("select * from " .TABLE_DOMAINS . " where domain_id = 1");
+					
+                    if(xtc_db_num_rows($multistore_init_query)<1){                       
+                        xtc_db_query("INSERT INTO " .TABLE_DOMAINS . " (
+                        						`domain_id` ,
+                        						`domain_http` ,
+                        						`domain_https` ,
+                                                `domain_user` ,
+                        						`current_template` ,
+                        						`id_languages` ,
+                        						`domain_status`
+                        						)
+                        						VALUES (
+                                    '1', '".str_replace('http://', '', str_replace('https://', '', HTTP_SERVER))."', '".str_replace('http://', '', str_replace('https://', '', HTTPS_SERVER))."', '".HTTP_SERVER."', '".CURRENT_TEMPLATE."', '0' , '1'
+                        						);");
+                        xtc_db_query("INSERT INTO ".TABLE_LANGUAGES_TO_DOMAINS." (
+                        						`languages_id` ,
+                        						`domain_id`
+                        						)
+                        						VALUES (
+                        						'1', '1'
+                        						), (
+                        						'2', '1'
+                        						);");
+                        xtc_db_query("INSERT INTO ".TABLE_DOMAINS_CONFIGURATION." (
+                          			      `domain_id`,
+                          						`language_id`,
+                          						`constant`,
+                          						`value`,
+                          						`source`,
+                          						`id`
+                          						)
+                          						VALUES (
+                          						'1',
+                          						'1',
+                          						'STORE_NAME',
+                          						'".STORE_NAME."',
+                          						'1',
+                          						'2'
+                          						), (
+                          						'1',
+                          						'2',
+                          						'STORE_NAME',
+                          						'".STORE_NAME."',
+                          						'1',
+                          						'1'
+                          						);");    
+                      
+                      
+    					$multistore_init_query = xtc_db_query("select * from " . TABLE_CONTENT_MANAGER . " where string_domains != ''");
+    					if(xtc_db_num_rows($multistore_init_query)<1){
+    						$multistore_init_query = xtc_db_query("select * from " . TABLE_CATEGORIES . " where string_domains != ''");
+    						if(xtc_db_num_rows($multistore_init_query)<1){
+    							xtc_db_query("Update " . TABLE_CATEGORIES . " set string_domains = '1'");
+    							xtc_db_query("Update " . TABLE_CONTENT_MANAGER . " set string_domains = '1'");
+    						}
+    					}
+                    }
+				} elseif($_POST['MULTISTORE'] == 'true' && MULTISTORE!='true'){
+					# Setzen des Multistore-Modus
+					# Klassenerweiterungs-Module installieren
+					xtc_db_query("delete from " . TABLE_CONFIGURATION . " where configuration_key LIKE 'MODULE_CATEGORIES_MULTISTORE2CATEGORIES_%'");
+					xtc_db_query("delete from " . TABLE_CONFIGURATION . " where configuration_key LIKE 'MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_%'");
+					xtc_db_query("insert into " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) values ('MODULE_CATEGORIES_MULTISTORE2CATEGORIES_STATUS', 'true','6', '1','xtc_cfg_select_option(array(\'true\', \'false\'), ', now())");
+					xtc_db_query("insert into " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, date_added) values ('MODULE_CATEGORIES_MULTISTORE2CATEGORIES_SORT_ORDER', '145','6', '2', now())");
+					xtc_db_query("insert into " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) values ('MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_STATUS', 'false','6', '1','xtc_cfg_select_option(array(\'true\', \'false\'), ', now())");
+					xtc_db_query("insert into " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, date_added) values ('MODULE_CATEGORIES_MULTISTORE4DESCRIPTIONS_SORT_ORDER', '146','6', '2', now())");
+            }
+			} # MODULE MULTISTORE	
+        	
+        	
           $configuration_query = xtc_db_query("SELECT *
                                                  FROM " . TABLE_CONFIGURATION . " 
                                                 WHERE configuration_group_id = '" . (int)$_GET['gID'] . "'
@@ -233,7 +327,11 @@
             ?>
               <table class="clear tableConfig">
                 <?php
-                  $configuration_query = xtc_db_query("SELECT configuration_key,
+					# MODULE MULTISTORE
+					if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+						$configuration_query = xtc_db_query("select distinct constant, configuration_key,configuration_id, configuration_value, use_function,set_function from " . TABLE_CONFIGURATION . " left join domains_configuration on configuration.configuration_key = domains_configuration.constant where configuration_group_id = '" . (int)$_GET['gID'] . "' AND sort_order >= 0 order by sort_order, configuration_id");
+					}else{
+                  		$configuration_query = xtc_db_query("SELECT configuration_key,
                                                               configuration_id, 
                                                               configuration_value, 
                                                               use_function,
@@ -242,7 +340,8 @@
                                                         WHERE configuration_group_id = '" . (int)$_GET['gID'] . "'
                                                           AND sort_order >= 0
                                                      ORDER BY sort_order, configuration_id");
-                  while ($configuration = xtc_db_fetch_array($configuration_query)) {
+                   } # MODULE MULTISTORE
+                   while ($configuration = xtc_db_fetch_array($configuration_query)) {
                     $configuration['configuration_value'] = stripslashes($configuration['configuration_value']);
                     
                     if ($_GET['gID'] == 6) {
@@ -328,6 +427,16 @@
                     if ($configuration_key_desc!=str_replace("<meta ","",$configuration_key_desc)) {
                       $configuration_key_desc = encode_htmlentities($configuration_key_desc);
                     }
+						# MODULE MULTISTORE
+						if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+							if($configuration['constant']){
+								$multiconstant=true;
+								$configuration_key_title .= '<span style="color: rgb(255, 0, 0);">*</span>'; 					                 
+							}
+							if($configuration['configuration_key']=='CURRENT_TEMPLATE' ||  $configuration['configuration_key']=='META_KEYWORDS' || $configuration['configuration_key']=='META_DESCRIPTION')
+								$configuration_key_desc .= TEXT_CONFIGURATION_DESCRIPTION;
+						}
+											
                     $class_mark = strpos(strtoupper($configuration['configuration_key']), 'SMTP') !== false || 
                                   strpos(strtoupper($configuration['configuration_key']), 'CONTACT_US') !== false || 
                                   strpos(strtoupper($configuration['configuration_key']), 'EMAIL_BILLING') !== false ||
@@ -345,6 +454,13 @@
                 ?>
               </table>
               <?php if ($_GET['gID'] != '6') { ?>
+                  <?php
+                  # MODULE MULTISTORE
+				  if(defined("MULTISTORE") &&  MULTISTORE=='true' && $multiconstant){
+                  	echo MS_TEXT_PRECONFIG;
+                  	checkMsError();
+				  }                                
+                  ?>
               <div class="main pdg2 txta-r mrg5"><input type="submit" class="button" onclick="this.blur();" value="<?php echo BUTTON_SAVE; ?>"/></div>
               <?php } ?>
             </form>

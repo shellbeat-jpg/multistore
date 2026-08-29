@@ -89,6 +89,9 @@
       $customers_password_encrypted =  xtc_RandomString(8);
       $customers_password = xtc_encrypt_password($customers_password_encrypted);
     }
+  	# MODULE MULTISTORE
+  	if(defined("MULTISTORE") &&  MULTISTORE=='true')
+       $id_domain = xtc_db_prepare_input($_POST['id_domain']);
 
     if (ACCOUNT_GENDER == 'true') {
       $customers_gender = xtc_db_prepare_input($_POST['customers_gender']);
@@ -265,6 +268,9 @@
         $sql_data_array['customers_gender'] = $customers_gender;
       if (ACCOUNT_DOB == 'true')
         $sql_data_array['customers_dob'] = xtc_date_raw($customers_dob);
+      # MODULE MULTISTORE 
+			if(defined("MULTISTORE") &&  MULTISTORE=='true')
+				$sql_data_array['id_domain'] = $id_domain;
 
       xtc_db_perform(TABLE_CUSTOMERS, $sql_data_array);
       $cc_id = xtc_db_insert_id();
@@ -323,8 +329,10 @@
 
         $smarty->caching = 0;
         $smarty->assign('language', $_SESSION['language']);
-        $html_mail = $smarty->fetch(CURRENT_TEMPLATE.'/admin/mail/'.$_SESSION['language'].'/create_account_mail.html');
-        $txt_mail = $smarty->fetch(CURRENT_TEMPLATE.'/admin/mail/'.$_SESSION['language'].'/create_account_mail.txt');
+        # MODULE MULTISTORE - $CURRENT_TEMPLATE
+        $html_mail = $smarty->fetch((MULTISTORE=='true'?$CURRENT_TEMPLATE:CURRENT_TEMPLATE).'/admin/mail/'.$_SESSION['language'].'/create_account_mail.html');
+        # MODULE MULTISTORE - $CURRENT_TEMPLATE
+        $txt_mail = $smarty->fetch((MULTISTORE=='true'?$CURRENT_TEMPLATE:CURRENT_TEMPLATE).'/admin/mail/'.$_SESSION['language'].'/create_account_mail.txt');
 
         xtc_php_mail(EMAIL_SUPPORT_ADDRESS,
                      EMAIL_SUPPORT_NAME,
@@ -592,7 +600,27 @@ require (DIR_WS_INCLUDES.'head.php');
                       ?>
                       </td>
                     </tr>
-
+								    <?php
+           					 # MODULE MULTISTORE 
+										 if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+										?>
+                    <tr>
+                      <td class="dataTableConfig col-left"><?php echo TABLE_HEADING_DOMAIN; ?>:</td>
+                      <td class="dataTableConfig col-single-right">
+                        <?php
+                        echo xtc_draw_hidden_field('languages_id', $_SESSION['languages_id']);
+                        if (isset($processed) && $processed == true) {
+                          echo xtc_draw_hidden_field('id_domain');
+                        } else {
+                      		echo xtc_draw_pull_down_menu('id_domain', $domain_array, 1);
+                        }
+                        ?>
+                      </td>
+                    </tr>
+								    <?php
+           					  # MODULE MULTISTORE
+                      }
+										?>
                     <tr>
                       <td class="dataTableConfig col-left"><?php echo ENTRY_MAIL; ?></td>
                       <td class="dataTableConfig col-single-right">

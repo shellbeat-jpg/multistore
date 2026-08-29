@@ -71,6 +71,17 @@ require (DIR_WS_INCLUDES.'head.php');
         <div class="pageHeadingImage"><?php echo xtc_image(DIR_WS_ICONS.'heading/icon_statistic.png'); ?></div>
         <div class="pageHeading"><?php echo HEADING_TITLE; ?></div>              
         <div class="main pdg2">Statistics</div>
+       <?php      
+        # MODULE MULTISTORE
+        if (MULTISTORE=='true') { 
+        ?>
+          <div class="main pdg2 flt-l" style="float: right;margin: 0px;">&nbsp;&nbsp;
+              <?php echo $strMultistoreSelectbox; ?> 
+          </div>
+        <?php 
+        } # MODULE MULTISTORE
+        ?>
+        
       </div>
       <div class="main pdg2 flt-l" style="margin:5px 0 0 128px;">
         <?php 
@@ -103,7 +114,8 @@ require (DIR_WS_INCLUDES.'head.php');
               </tr>
               <?php
               $rows = (isset($_GET['page']) && $_GET['page'] > 1) ? $_GET['page']*$page_max_display_results-$page_max_display_results : 0;   
-              $products_query_raw = "SELECT p.products_id,
+              # MODULE MULTISTORE
+			  $products_query_raw = "SELECT " . (MULTISTORE=='true'? "DISTINCT ":"") ."p.products_id,
                                             p.products_model,                  
                                             pd.products_name, 
                                             pd.products_viewed,
@@ -111,8 +123,10 @@ require (DIR_WS_INCLUDES.'head.php');
                                        FROM " . TABLE_PRODUCTS . " p
                                        JOIN " . TABLE_PRODUCTS_DESCRIPTION . " pd
                                             ON p.products_id = pd.products_id
+                                   " . (MULTISTORE=='true'?MULTISTORE_SQL_SEARCH_JOIN1 . MULTISTORE_SQL_SEARCH_JOIN2:"") ."
                                        JOIN " . TABLE_LANGUAGES . " l 
                                             ON l.languages_id = pd.language_id
+                                   " . (MULTISTORE=='true'? " where 1=1  $ms_default_select":"") ."
                                    ORDER BY pd.products_viewed DESC, pd.products_name ASC";
               $products_split = new splitPageResults($_GET['page'], $page_max_display_results, $products_query_raw, $products_query_numrows, 'p.products_id');
               $products_query = xtc_db_query($products_query_raw);

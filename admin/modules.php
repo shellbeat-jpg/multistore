@@ -164,6 +164,10 @@
           if ($action == 'install') {
             $module->install();
           } elseif ($action == 'removeconfirm') {
+  			# MODULE MULTISTORE
+  			if(defined("MULTISTORE") &&  MULTISTORE=='true')
+        	xtc_db_query("Delete from " . TABLE_DOMAINS_CONFIGURATION ." where source = '".$set.'_'.$module_class."'");
+        
             $module->remove();
           } elseif ($action == 'update') {
             // update keys
@@ -215,13 +219,14 @@
     $module_keys = method_exists($module,'keys') ? $module->keys() : array();
 
     $keys_extra = array();
-    if (!empty($module_keys)) {
-      $key_value_query = xtc_db_query("SELECT configuration_key,
+    # MODULE MULTISTORE 
+    $key_value_query = xtc_db_query("SELECT ".(MULTISTORE=='true'?"distinct constant,":"")." configuration_key,
                                               configuration_value,
                                               use_function,
                                               set_function
-                                         FROM " . TABLE_CONFIGURATION . "
-                                        WHERE configuration_key IN ('" . implode("', '", $module_keys) . "')
+                                       FROM " . TABLE_CONFIGURATION . 
+                                       (MULTISTORE=='true'?" LEFT JOIN " . TABLE_DOMAINS_CONFIGURATION . " on configuration.configuration_key = domains_configuration.constant " : "") .
+                                       " WHERE configuration_key IN ('" . implode("', '", $module_keys) . "')
                                      ORDER BY FIELD(configuration_key, '".implode("', '", $module_keys)."')");
       while ($key_value = xtc_db_fetch_array($key_value_query)) {
         $keys_extra[$key_value['configuration_key']] = array(
@@ -231,8 +236,15 @@
           'use_function' => $key_value['use_function'],
           'set_function' => $key_value['set_function'],
         );
+      # MODULE MULTISTORE
+	  if(defined("MULTISTORE") &&  MULTISTORE=='true'){ 
+		if ($key_value['constant']){  
+        	$multiconstant = true; 		     
+        	$keys_extra[$module_keys[$j]]['title'] .= '<span style="color: rgb(255, 0, 0);">*</span>';
       }
     }
+    }
+    
     $module_info['keys'] = $keys_extra;
     
     return $module_info;
@@ -630,7 +642,9 @@ if (xtc_not_null($action) && !$box) {
                     if (isset($mInfo->extended_description) && $mInfo->extended_description != '') {
                       $contents[] = array('text' => '<br />' . $mInfo->extended_description);
                     }
-                    $contents[] = array('text' => '<br />' . $keys);
+                    # MODULE MULTISTORE
+                    $contents[] = array('text' => '<br />' . $keys. (MULTISTORE=='true'&&$multiconstant?'<br>'.MS_TEXT_PRECONFIG:''));
+                  
                   } else {
                     $contents[] = array('align' => 'center', 'text' => '<a class="button btnbox" onclick="this.blur();" href="' . xtc_href_link(FILENAME_MODULES, 'set=' . $set . '&module=' . $mInfo->code . '&action=install') . '">' . BUTTON_MODULE_INSTALL . '</a>');
                     $contents[] = array('text' => '<br />' . $mInfo->description);

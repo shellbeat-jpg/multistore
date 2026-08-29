@@ -99,6 +99,11 @@
         while ($languages = xtc_db_fetch_array($languages_query, true)) {
           $languages_array[$languages['code']] = $languages;
           $languages_array[$languages['code']]['id'] = $languages['languages_id'];
+ 			# MODULE MULTISTORE
+			if(defined('RUN_MODE_ADMIN') || (!defined('RUN_MODE_ADMIN') || (defined('MULTISTORE') && MULTISTORE!='true') ) || xtc_validate_domain(ID_DOMAIN, $languages['languages_id'])){
+        		$languages_array[$languages['code']] = $languages;
+        		$languages_array[$languages['code']]['id'] = $languages['languages_id'];
+			}             
         }
       }
     
@@ -115,6 +120,20 @@
           }
         }
       }
+    
+    # MODULE MULTISTORE
+    function ms_get_default_language($idDefault=0) {
+        if($idDefault>0){
+          while (list($key, $value) = each($this->catalog_languages)) {
+            if ($this->catalog_languages[$key]['id'] == $idDefault) {
+              $this->language = $this->catalog_languages[$key];
+              break;
+            }
+          }        
+        }  
+    }
+    
+    
     }
   
   }

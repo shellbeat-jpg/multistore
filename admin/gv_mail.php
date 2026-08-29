@@ -77,10 +77,39 @@
     $smarty->assign('language', $_SESSION['language']);
     $smarty->caching = 0;
 
+    # MODULE MULTISTORE
+	if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+	    $id_domain = $data['id_domain'];
+	    /*  Laden der shopspezifischen Einstellungen */
+		$CURRENT_TEMPLATE = xtc_get_template_by_domain ($id_domain, xtc_get_domains());
+		$HTTP_SERVER =  xtc_get_domain_server($id_domain,  (ENABLE_SSL_CATALOG == 'true'?'https':'http'));   				
+	    $EMAIL_BILLING_SUBJECT = getMultistoreConfigValue('EMAIL_BILLING_SUBJECT', $id_domain);
+		$EMAIL_BILLING_ADDRESS = getMultistoreConfigValue('EMAIL_BILLING_ADDRESS', $id_domain);
+		$EMAIL_BILLING_NAME = getMultistoreConfigValue('EMAIL_BILLING_NAME', $id_domain);
+	    $EMAIL_BILLING_REPLY_ADDRESS = getMultistoreConfigValue('EMAIL_BILLING_REPLY_ADDRESS', $id_domain);
+		$EMAIL_BILLING_REPLY_ADDRESS_NAME = getMultistoreConfigValue('EMAIL_BILLING_REPLY_ADDRESS_NAME', $id_domain);     				 
+	} # MODULE MULTISTORE 
+
     $html_mail = $smarty->fetch(CURRENT_TEMPLATE . '/admin/mail/'.$_SESSION['language'].'/'.$template.'.html');
     $txt_mail = $smarty->fetch(CURRENT_TEMPLATE . '/admin/mail/'.$_SESSION['language'].'/'.$template.'.txt');
     $txt_mail = strip_tags($txt_mail);
     
+ 	# MODULE MULTISTORE
+	if(defined("MULTISTORE") &&  MULTISTORE=='true'){      
+      if ($subject=='') $subject=$EMAIL_BILLING_SUBJECT;
+      xtc_php_mail($EMAIL_BILLING_ADDRESS,
+                   $EMAIL_BILLING_NAME, 
+                   $data['customers_email_address'], 
+                   $data['customers_firstname'] . ' ' . $data['customers_lastname'], 
+                   '', 
+                   $EMAIL_BILLING_REPLY_ADDRESS, 
+                   $EMAIL_BILLING_REPLY_ADDRESS_NAME, 
+                   '', 
+                   '', 
+                   $subject, 
+                   $html_mail, 
+                   $txt_mail); 
+  	}else{
     xtc_php_mail(EMAIL_BILLING_ADDRESS,
                  EMAIL_BILLING_NAME, 
                  $data['customers_email_address'], 
@@ -93,6 +122,7 @@
                  $data['subject'], 
                  $html_mail, 
                  $txt_mail);
+  	} # MODULE MULTISTORE
     
     if (!isset($_GET['cid']) || $_GET['cid'] == '') {
       $sql_data_array = array(

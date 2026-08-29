@@ -61,6 +61,21 @@
                                      WHERE customers_id = '" . $gv['customer_id'] . "'");
         $mail = xtc_db_fetch_array($mail_query);
 
+		# MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+			$id_domain = $mail['id_domain'];
+			/*  Shop-Template */
+			$CURRENT_TEMPLATE = xtc_get_template_by_domain ($id_domain, xtc_get_domains());
+			/*  Shop-URL der Anmeldung */
+			$HTTP_SERVER =  xtc_get_domain_server($id_domain, 'http');
+			/*  Laden der shopspezifischen Einstellungen zur weiteren Verwendung (den Konstanten werden im Folgendem ein $ vorrangesetzt) */
+			$EMAIL_BILLING_SUBJECT = getMultistoreConfigValue('EMAIL_BILLING_SUBJECT', $id_domain);
+			$EMAIL_BILLING_ADDRESS = getMultistoreConfigValue('EMAIL_BILLING_ADDRESS', $id_domain);
+			$EMAIL_BILLING_NAME = getMultistoreConfigValue('EMAIL_BILLING_NAME', $id_domain);
+			$EMAIL_BILLING_REPLY_ADDRESS = getMultistoreConfigValue('EMAIL_BILLING_REPLY_ADDRESS', $id_domain);
+			$EMAIL_BILLING_REPLY_ADDRESS_NAME = getMultistoreConfigValue('EMAIL_BILLING_REPLY_ADDRESS_NAME', $id_domain);
+		} 
+		
         // assign language to template for caching
         $smarty->assign('language', $_SESSION['language']);
         $smarty->caching = 0;
@@ -70,8 +85,10 @@
         $smarty->compile_dir = DIR_FS_CATALOG.'templates_c';
         $smarty->config_dir = DIR_FS_CATALOG.'lang';
 
-        $smarty->assign('tpl_path', HTTP_SERVER.DIR_WS_CATALOG.'templates/'.CURRENT_TEMPLATE.'/');
-        $smarty->assign('logo_path', HTTP_SERVER.DIR_WS_CATALOG.'templates/'.CURRENT_TEMPLATE.'/img/');
+        # MODULE MULTISTORE
+        $smarty->assign('tpl_path', (MULTISTORE=='true'?$HTTP_SERVER:HTTP_SERVER).DIR_WS_CATALOG.'templates/'.(MULTISTORE=='true'?$CURRENT_TEMPLATE:CURRENT_TEMPLATE).'/');
+        # MODULE MULTISTORE
+        $smarty->assign('logo_path', (MULTISTORE=='true'?$HTTP_SERVER:HTTP_SERVER).DIR_WS_CATALOG.'templates/'.(MULTISTORE=='true'?$CURRENT_TEMPLATE:CURRENT_TEMPLATE).'/img/');
 
         $smarty->assign('AMMOUNT',$currencies->format($gv_amount));
         $smarty->assign('NAME', $mail['customers_firstname'].' '.$mail['customers_lastname']);
@@ -79,15 +96,26 @@
         $smarty->assign('FIRSTNAME', $mail['customers_firstname']);
         $smarty->assign('LASTNAME', $mail['customers_lastname']);
 
-        $html_mail = $smarty->fetch(CURRENT_TEMPLATE . '/admin/mail/'.$_SESSION['language'].'/gift_accepted.html');
-        $txt_mail = $smarty->fetch(CURRENT_TEMPLATE . '/admin/mail/'.$_SESSION['language'].'/gift_accepted.txt');
+      # MODULE MULTISTORE
+      $html_mail=$smarty->fetch((MULTISTORE=='true'?$CURRENT_TEMPLATE:CURRENT_TEMPLATE) . '/admin/mail/'.$_SESSION['language'].'/gift_accepted.html');
+      # MODULE MULTISTORE
+      $txt_mail=$smarty->fetch((MULTISTORE=='true'?$CURRENT_TEMPLATE:CURRENT_TEMPLATE) . '/admin/mail/'.$_SESSION['language'].'/gift_accepted.txt');
 
-        // create subject
-        $order_subject = str_replace('{$nr}', $gv['order_id'], EMAIL_BILLING_SUBJECT_ORDER);
-        $order_subject = str_replace('{$date}', xtc_date_long($gv['date_created']), $order_subject);
-        $order_subject = str_replace('{$lastname}', $mail['customers_lastname'], $order_subject);
-        $order_subject = str_replace('{$firstname}', $mail['customers_firstname'], $order_subject);
-
+      # MODULE MULTISTORE
+			if(defined("MULTISTORE") &&  MULTISTORE=='true'){    
+          xtc_php_mail($EMAIL_BILLING_ADDRESS,
+                       $EMAIL_BILLING_NAME, 
+                       $mail['customers_email_address'], 
+                       $mail['customers_firstname'] . ' ' . $mail['customers_lastname'], 
+                       '', 
+                       $EMAIL_BILLING_REPLY_ADDRESS, 
+                       $EMAIL_BILLING_REPLY_ADDRESS_NAME, 
+                       '', 
+                       '', 
+                       $EMAIL_BILLING_SUBJECT, 
+                       $html_mail, 
+                       $txt_mail); 
+      }else{
         xtc_php_mail(EMAIL_BILLING_ADDRESS,
                      EMAIL_BILLING_NAME,
                      $mail['customers_email_address'], 
@@ -193,7 +221,15 @@
                   }
                   ?>
                 <td class="dataTableContent"><?php echo $gv_list['customers_firstname'] . ' ' . $gv_list['customers_lastname']; ?></td>
-                <td class="dataTableContent txta-c"><?php echo $gv_list['order_id']; ?></td>
+				<td class="dataTableContent txta-c"><?php
+                  # MODULE MULTISTORE
+                  if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+                    echo ms_build_order_id($gv_list);
+                  }else{
+                    echo $gv_list['order_id']; 
+                  }              
+                ?></td>
+                
                 <td class="dataTableContent txta-r"><?php echo $currencies->format($gv_list['amount']); ?></td>
                 <td class="dataTableContent txta-r"><?php echo xtc_datetime_short($gv_list['date_created']); ?></td>
                 <td class="dataTableContent txta-r"><?php if (isset($gInfo) && is_object($gInfo) && $gv_list['unique_id'] == $gInfo->unique_id) { echo xtc_image(DIR_WS_IMAGES . 'icon_arrow_right.gif', ICON_ARROW_RIGHT); } else { echo '<a href="' . xtc_href_link(FILENAME_GV_QUEUE, 'page=' . $page . '&gid=' . $gv_list['unique_id']) . '">' . xtc_image(DIR_WS_IMAGES . 'icon_arrow_grey.gif', IMAGE_ICON_INFO) . '</a>'; } ?>&nbsp;</td>

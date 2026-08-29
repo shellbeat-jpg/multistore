@@ -47,6 +47,12 @@ if (function_exists('ini_set')) {
   @ini_set('session.use_trans_sid', 0);
 }
 
+
+# MODULE MULTISTORE
+if (file_exists('../includes/extra/multistore/multistore_preconfig.inc.php')) {
+  include_once ('../includes/extra/multistore/multistore_preconfig.inc.php');
+}
+
 // configuration parameters
 if (file_exists('../includes/local/configure.php')) {
   include_once('../includes/local/configure.php');
@@ -129,7 +135,7 @@ require_once(DIR_FS_INC . 'get_admin_access.inc.php');
 xtc_db_connect() or die('Unable to connect to database server!');
 
 foreach(auto_include(DIR_FS_ADMIN.'includes/extra/functions/','php') as $file) require ($file);
-
+ 
 // design layout (wide of boxes in pixels) (default: 125)
 define('BOX_WIDTH', 125);
 
@@ -137,9 +143,12 @@ define('BOX_WIDTH', 125);
 define('DB_CACHE', 'false');
 
 $duplicate_configuration = array();
-$configuration_query = xtc_db_query('select configuration_key as cfgKey, configuration_value as cfgValue from ' . TABLE_CONFIGURATION . '');
+# MODULE MULTISTORE
+$configuration_query = xtc_db_query('select configuration_key as cfgKey, configuration_value as cfgValue from ' . TABLE_CONFIGURATION . ' order by configuration_id');
 while ($configuration = xtc_db_fetch_array($configuration_query)) {
-  if ($configuration['cfgKey'] != 'DB_CACHE' && $configuration['cfgKey'] != 'STORE_DB_TRANSACTIONS') {
+  # MODULE MULTISTORE
+  if ($configuration['cfgKey'] != 'DB_CACHE' && $configuration['cfgKey'] != 'STORE_DB_TRANSACTIONS' && (!defined("MULTISTORE") || MULTISTORE!='true')) {
+
     if (!defined($configuration['cfgKey'])) {
       define($configuration['cfgKey'], stripslashes($configuration['cfgValue']));
     } else {
@@ -148,9 +157,16 @@ while ($configuration = xtc_db_fetch_array($configuration_query)) {
   }
 }
 
-foreach(auto_include(DIR_FS_ADMIN.'includes/extra/application_top/application_top_begin/','php') as $file) require ($file);
+// general functions
+require(DIR_WS_FUNCTIONS . 'general.php');
+# MODULE MULTISTORE - moved down
+# foreach(auto_include(DIR_FS_ADMIN.'includes/extra/application_top/application_top_begin/','php') as $file) require ($file);
 
-define('FILENAME_IMAGEMANIPULATOR', IMAGE_MANIPULATOR);
+# MODULE MULTISTORE - moved down
+# define('FILENAME_IMAGEMANIPULATOR',IMAGE_MANIPULATOR);
+# MODULE MULTISTORE - moved from top
+foreach(auto_include(DIR_FS_ADMIN.'includes/extra/application_top/application_top_begin/','php') as $file) require ($file);
+define('FILENAME_IMAGEMANIPULATOR',IMAGE_MANIPULATOR);
 
 // set the top level domains
 $http_domain_arr = xtc_get_top_level_domain(HTTP_SERVER);
@@ -189,7 +205,9 @@ include (DIR_FS_CATALOG.DIR_WS_MODULES.'verify_session.php');
 include (DIR_FS_CATALOG.DIR_WS_MODULES.'set_language_sessions.php');
 
 // general functions
-require(DIR_WS_FUNCTIONS . 'general.php');
+# MODULE MULTISTORE
+# moved to top
+# require(DIR_WS_FUNCTIONS . 'general.php');
 
 // define our general functions used application-wide
 require(DIR_WS_FUNCTIONS . 'html_output.php');

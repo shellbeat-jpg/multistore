@@ -158,6 +158,10 @@
             'language' => $_SESSION['language'],
             'languages_id' => $_SESSION['languages_id']
           );
+        # MODULE MULTISTORE
+        if(defined("MULTISTORE") &&  MULTISTORE=='true')
+        	$sql_data_array['id_domain']=$customers1['id_domain'];
+        
 
         xtc_db_perform(TABLE_ORDERS, $sql_data_array);
         $orders_id = xtc_db_insert_id();
@@ -580,6 +584,10 @@
             if (ACCOUNT_DOB == 'true') {
               $sql_data_array['customers_dob'] = xtc_date_raw($customers_dob);
             }
+        
+          # MODULE MULTISTORE
+          if(defined("MULTISTORE") &&  MULTISTORE=='true')
+          	$sql_data_array['id_domain']=xtc_db_prepare_input($_POST['id_domain']);
 
             xtc_db_perform(TABLE_CUSTOMERS, $sql_data_array, 'update', "customers_id = '".$customers_id."' AND customers_default_address_id = '".$address_book_id."'");
 

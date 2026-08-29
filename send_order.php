@@ -48,7 +48,13 @@ if ((isset($_SESSION['customer_id'])
   $smarty->assign('csID', $order->customer['csID']);
 
   $order_total = $order->getTotalData($insert_id);
-  $smarty->assign('order_data', $order->getOrderData($insert_id));
+  	# MODULE MULTISTORE
+  	if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+  		$smarty->assign('order_data', $order->getOrderData($insert_id, $order->info["id_domain"])); 
+	}else{
+  		$smarty->assign('order_data', $order->getOrderData($insert_id)); //ACHTUNG für Bestellbestätigung aus Admin Funktion in admin/includes/classes/order.php
+	}
+
   $smarty->assign('order_total', $order_total['data']);
 
   // assign language to template for caching
@@ -159,7 +165,9 @@ if ((isset($_SESSION['customer_id'])
   $txt_mail = $smarty->fetch(CURRENT_TEMPLATE.'/mail/'.$order->info['language'].'/order_mail.txt');
   
   // create subject
-  $order_subject = str_replace('{$nr}', $insert_id, EMAIL_BILLING_SUBJECT_ORDER);
+  # MODULE MULTISTORE  
+  $order_subject = str_replace('{$nr}', (MULTISTORE=='true'?ms_build_order_id($order):$insert_id), EMAIL_BILLING_SUBJECT_ORDER);
+  
   $order_subject = str_replace('{$date}', xtc_date_long($order->info['date_purchased']), $order_subject); // Tomcraft - 2011-12-28 - Use date_puchased instead of current date in E-Mail subject
   $order_subject = str_replace('{$lastname}', $order->customer['lastname'], $order_subject);
   $order_subject = str_replace('{$firstname}', $order->customer['firstname'], $order_subject);

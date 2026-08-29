@@ -44,6 +44,16 @@
                            SET ".$key." = '1'
                          WHERE customers_id = '".(int)$_GET['cID']."'");
         }
+		# MODULE MULTISTORE
+		if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+		  xtc_db_query("DELETE FROM " . TABLE_ADMIN_ACCESS_DOMAINS . " WHERE customers_id = '".(int)$_GET['cID']."'");
+			if ($_GET['cID'] != 1 && is_array($_POST['domains'])) {
+				foreach ($_POST['domains'] AS $domain_id) {
+		       xtc_db_query("INSERT INTO " . TABLE_ADMIN_ACCESS_DOMAINS . " (customers_id, domain_id) VALUES('".(int)$_GET['cID']."', '$domain_id')");
+				}
+			}  				 
+		} # MODULE MULTISTORE
+				
         xtc_redirect(xtc_href_link(FILENAME_CUSTOMERS, xtc_get_all_get_params(array('cID','action')).'cID=' . (int)$_GET['cID'], 'NONSSL'));
         break;
 
@@ -204,6 +214,50 @@ require (DIR_WS_INCLUDES.'head.php');
         <br/>
 
         <?php echo xtc_draw_form('accounting', FILENAME_ACCOUNTING, xtc_get_all_get_params(array('action'))  . 'action=save', 'post', 'enctype="multipart/form-data"' . $confirm_submit); ?>
+       	<?php          
+        	# MODULE MULTISTORE
+        	if(defined("MULTISTORE") &&  MULTISTORE=='true'){
+          ?>
+          <table class="tableBoxCenter collapse">
+            <tr class="dataTableHeadingRow">
+              <td class="dataTableHeadingContent" colspan="2" style="vertical-align:middle;"><?php echo TEXT_ACCESS . ' ' . TXT_DOMAINS; ?></td>
+              <td class="dataTableHeadingContent" style="vertical-align:middle;"><?php echo TEXT_ALLOWED ; ?></td>
+              <td class="dataTableHeadingContent txta-r">
+                <div class="smallText">
+                  <a class="button" href="#" onclick="set_checkboxDomains(1);"><?php echo BUTTON_SET; ?></a>
+                  <?php if ($_GET['cID'] != '1') { ?>
+                  <a class="button" href="#" onclick="set_checkboxDomains(0);"><?php echo BUTTON_UNSET; ?></a>
+                  <?php } ?>
+                </div>
+              </td>
+            </tr>   
+            <tr>
+            <td colspan="2" class="main"> 
+      	    <?php
+             $arrAccess = admin_access_domains((int)$_GET['cID']);
+      			 $categories_query = xtc_db_query("select * from " . TABLE_DOMAINS . " order by domain_status, domain_http ASC");
+      		   while ($categories_data = xtc_db_fetch_array($categories_query)) {
+                  $params = '';
+                  $checked = false;
+                  $hidden_field = '';
+                  if (in_array($categories_data['domain_id'], $arrAccess)) {
+                    $checked = true;
+                    if ($_GET['cID'] == '1') {
+                      $params = ' disabled="disabled"';
+                      $hidden_field =  xtc_draw_hidden_field('domains[]', $categories_data['domain_id']).PHP_EOL;
+                    }
+                  } 
+                  echo '<tr class="dataTableRow">';
+                  echo '<td class="dataTableContent" colspan="2" style="width:218px;">'.$categories_data['domain_http'].'</td>
+                        <td class="dataTableContent" colspan="2">'. PHP_EOL . $hidden_field. xtc_draw_checkbox_field('domains[]', $categories_data['domain_id'], $checked, '', $params). PHP_EOL .'</td>
+                      </tr>';     
+             } 
+          	?> 
+          </table><br/>
+        	<?php 
+        	} # MODULE MULTISTORE
+          ?>
+          
           <table class="tableBoxCenter collapse">
             <tr>
               <td>

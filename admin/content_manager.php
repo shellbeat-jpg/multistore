@@ -230,6 +230,17 @@
             $sql_data_array['content_group_index'] = (int)$content_new_group_index[$i][$languages[$l]['id']];
           }
           
+           # MODULE MULTISTORE
+           if(defined("MULTISTORE") &&  MULTISTORE=='true') {
+	         $string_domains = '';
+	         if(count($_POST['string_domains'])>0){
+               $string_domains = join(";", $_POST['string_domains']);
+	           if(substr($string_domains, 0 , 2) == "0;")
+	              $string_domains = substr($string_domains, 2 , strlen($string_domains)-2);             
+	         }  
+	         $sql_data_array['string_domains']=$string_domains;
+      	  } # MODULE MULTISTORE
+      		
           if ($id == 'update' && $content_id[$i][$languages[$l]['id']] > 0) {
             $sql_data_array['last_modified'] = 'now()';
             xtc_db_perform(TABLE_CONTENT_MANAGER, array_merge($sql_data_array, $sql_data_lang_array), 'update', "content_id = '".$content_id[$i][$languages[$l]['id']]."'");
