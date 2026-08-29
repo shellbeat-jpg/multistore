@@ -1,0 +1,125 @@
+<?php
+/* -----------------------------------------------------------------------------------------
+   $Id: cao_faktura.php 16685 2025-12-08 15:04:39Z GTB $
+
+   modified eCommerce Shopsoftware
+   http://www.modified-shop.org
+
+   Copyright (c) 2009 - 2013 [www.modified-shop.org]
+   -----------------------------------------------------------------------------------------
+   Released under the GNU General Public License
+   ---------------------------------------------------------------------------------------*/
+
+defined( '_VALID_XTC' ) or die( 'Direct Access to this location is not allowed.' );
+
+class cao_faktura {
+
+  var $code;
+  var $title;
+  var $description;
+  var $sort_order;
+  var $enabled;
+  var $_check;
+
+  function __construct() {
+     $this->code = 'cao_faktura';
+     $this->title = MODULE_CAO_FAKTURA_TEXT_TITLE;
+     $this->description = MODULE_CAO_FAKTURA_TEXT_DESCRIPTION;
+     $this->sort_order = defined('MODULE_CAO_FAKTURA_SORT_ORDER') ? MODULE_CAO_FAKTURA_SORT_ORDER : '';
+     $this->enabled = ((defined('MODULE_CAO_FAKTURA_STATUS') && MODULE_CAO_FAKTURA_STATUS == 'true') ? true : false);
+  }
+
+  function process($file) {
+    if (isset($_POST['password']) && $_POST['password'] != '') {
+      xtc_db_query("UPDATE ".TABLE_CONFIGURATION."
+                       SET configuration_value = '".xtc_db_input(md5($_POST['password']))."'
+                     WHERE configuration_key = 'MODULE_CAO_FAKTURA_PASSWORD'");
+    }
+
+    if (isset($_POST['price'])) {
+      xtc_db_query("UPDATE ".TABLE_CONFIGURATION."
+                       SET configuration_value = '".xtc_db_input(json_encode($_POST['price']))."'
+                     WHERE configuration_key = 'MODULE_CAO_FAKTURA_PRICES'");
+    }  
+  }
+
+  function display() {
+    $price_groups_array = array();
+    $price_groups_array[] = array('id' => '', 'text' => MODULE_CAO_FAKTURA_TEXT_NO_PRICE);
+    for ($i=1; $i<=(int)MODULE_CAO_FAKTURA_PRICE_GROUPS; $i++) {
+      $price_groups_array[] = array('id' => $i, 'text' => sprintf('VK %s', $i));
+    }
+    
+    $prices_array = json_decode(MODULE_CAO_FAKTURA_PRICES, true);
+    $customers_statuses_array = xtc_get_customers_statuses();
+    $prices = '';
+    
+    foreach ($customers_statuses_array as $customers_status) {
+      if ($customers_status['id'] != 0) {
+        $prices .= sprintf('Kundengruppe %s:', $customers_status['text']).'<br>';
+        $prices .= xtc_draw_pull_down_menu('price['.$customers_status['id'].']', $price_groups_array, ((isset($prices_array[$customers_status['id']])) ? $prices_array[$customers_status['id']] : '')).'<br /><br />';
+      }
+    }
+    
+    return array('text' => '<br/><b>'.MODULE_CAO_FAKTURA_PASSWORD_TITLE.'</b>'.
+                           '<br/>'.MODULE_CAO_FAKTURA_PASSWORD_DESC. 
+                           '<br/>'.xtc_draw_input_field('password', '').'<br/>'.
+                           '<br/><b>'.MODULE_CAO_FAKTURA_STATUSES_PRICES_TITLE.'</b>'.
+                           '<br/>'.MODULE_CAO_FAKTURA_STATUSES_PRICES_DESC.'<br/>'.
+                           '<br/>'.$prices.'<br/>'.
+                           '<br /><div align="center">' . xtc_button(BUTTON_SAVE) .
+                           xtc_button_link(BUTTON_CANCEL, xtc_href_link(FILENAME_MODULE_EXPORT, 'set=' . $_GET['set'] . '&module=cao_faktura')) . "</div>");
+  }
+
+  function check() {
+    if (!isset($this->_check)) {
+      if (defined('MODULE_CAO_FAKTURA_STATUS')) {
+        $this->_check = true;
+      } else {
+        $check_query = xtc_db_query("SELECT configuration_value 
+                                       FROM " . TABLE_CONFIGURATION . " 
+                                      WHERE configuration_key = 'MODULE_CAO_FAKTURA_STATUS'");
+        $this->_check = xtc_db_num_rows($check_query);
+      }
+    }
+    return $this->_check;
+  }
+    
+  function install() {
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) VALUES ('MODULE_CAO_FAKTURA_STATUS', 'false',  '6', '1', 'xtc_cfg_select_option(array(\'true\', \'false\'), ', now())");  
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) VALUES ('MODULE_CAO_FAKTURA_EMAIL', '',  '6', '1', '', now())");  
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) VALUES ('MODULE_CAO_FAKTURA_PASSWORD', '',  '6', '1', '', now())");  
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) VALUES ('MODULE_CAO_FAKTURA_ORDERS_STATUS', '1',  '6', '1', 'xtc_cfg_multi_checkbox(\'xtc_get_orders_status\', \'chr(44)\',', now())");
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) VALUES ('MODULE_CAO_FAKTURA_LOG', 'false',  '6', '1', 'xtc_cfg_select_option(array(\'true\', \'false\'), ', now())");  
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) VALUES ('MODULE_CAO_FAKTURA_PRICE_GROUPS', '4',  '6', '1', '', now())");  
+    xtc_db_query("INSERT INTO " . TABLE_CONFIGURATION . " (configuration_key, configuration_value, configuration_group_id, sort_order, set_function, date_added) VALUES ('MODULE_CAO_FAKTURA_PRICES', '4',  '6', '1', '', now())");  
+
+    xtc_db_query("CREATE TABLE IF NOT EXISTS `cao_log` (
+                   `log_id` int(11) NOT NULL AUTO_INCREMENT,
+                   `user` varchar(256) NOT NULL,
+                   `pass` varchar(32) NOT NULL,
+                   `method` varchar(8) NOT NULL,
+                   `action` varchar(32) NOT NULL,
+                   `post_data` longtext NOT NULL,
+                   `get_data` longtext NOT NULL,
+                   `date_added` datetime NOT NULL,
+                   PRIMARY KEY (`log_id`)
+                  )");
+  }
+
+  function remove() {
+    xtc_db_query("DELETE FROM " . TABLE_CONFIGURATION . " WHERE configuration_key in ('" . implode("', '", $this->keys()) . "')");
+  }
+
+  function keys() {
+    $key = array(
+      'MODULE_CAO_FAKTURA_STATUS',
+      'MODULE_CAO_FAKTURA_LOG',
+      'MODULE_CAO_FAKTURA_PRICE_GROUPS',
+      'MODULE_CAO_FAKTURA_ORDERS_STATUS',
+      'MODULE_CAO_FAKTURA_EMAIL',
+    );
+
+    return $key;
+  }
+}

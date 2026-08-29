@@ -1,0 +1,562 @@
+<?php
+/* -----------------------------------------------------------------------------------------
+   $Id: image_processing_step.php 16804 2026-01-26 13:52:57Z GTB $
+
+   modified eCommerce Shopsoftware
+   http://www.modified-shop.org
+
+   Copyright (c) 2009 - 2013 [www.modified-shop.org]
+   -----------------------------------------------------------------------------------------
+   based on:
+   (c) 2000-2001 The Exchange Project  (earlier name of osCommerce)
+   (c) 2002-2003 osCommerce(cod.php,v 1.28 2003/02/14); www.oscommerce.com
+   (c) 2003	 nextcommerce (invoice.php,v 1.6 2003/08/24); www.nextcommerce.org
+   (c) 2006 XT-Commerce (image_processing_step.php 950 2005-05-14; www.xt-commerce.com
+   --------------------------------------------------------------
+   Contribution
+   image_processing_step (step-by-step Variante B) by INSEH 2008-03-26
+
+   new jquery image_processing / only missing image/ max images  by web28 2015-12-01
+   fix only_missing_images/ support for logfile/ display image name  by web28 2016-02-20
+
+   Released under the GNU General Public License
+   ---------------------------------------------------------------------------------------*/
+
+  defined( '_VALID_XTC' ) or die( 'Direct Access to this location is not allowed.' );
+
+  class image_processing_step {
+
+    var $code;
+    var $title;
+    var $description;
+    var $sort_order;
+    var $enabled;
+    var $properties;
+    var $_check;
+
+    var $files;
+    var $logfile;
+    var $module_filename;
+    var $images_type_array;
+    var $get_params;
+    var $post_params;
+    var $data_volume;
+    var $max_files;
+
+    function __construct() {
+      global $current_page;
+      
+      $this->code = 'image_processing_step';
+      $this->title = MODULE_STEP_IMAGE_PROCESS_TEXT_TITLE;
+      $this->description = MODULE_STEP_IMAGE_PROCESS_TEXT_DESCRIPTION;
+      $this->sort_order = defined('MODULE_STEP_IMAGE_PROCESS_SORT_ORDER') ? MODULE_STEP_IMAGE_PROCESS_SORT_ORDER : '';
+      $this->enabled = ((defined('MODULE_STEP_IMAGE_PROCESS_STATUS') && MODULE_STEP_IMAGE_PROCESS_STATUS == 'True') ? true : false);
+      
+      $this->module_filename = $current_page;
+      $this->logfile = DIR_FS_CATALOG.'log/mod_image_processing_'.date('Y-m-d').'.log';
+      $this->properties = array();
+      $this->files = array();
+      $this->get_params = array();
+      $this->post_params = array();
+      $this->images_type_array = array(
+        '',
+        '_list',
+        '_mobile'
+      );
+
+      $this->properties['form_edit'] = xtc_draw_form('modules', FILENAME_MODULE_EXPORT, 'set=' . $_GET['set'] . '&module=' . $this->code . '&action=custom','post', 'id="form_image_processing"');
+    }
+    
+    function get_images_files($filedir, $offset = 1, $limit = 1) {
+      $this->data_volume = 0;
+      $this->max_files = 0;
+      
+      $ext_array = array('gif','jpg','jpeg','png');
+
+      $max_files = 0;
+      $files = array();
+      if ($dir = opendir($filedir)) {
+        while ($file = readdir($dir)) {
+          $tmp = explode('.',$file);
+          if (is_array($tmp)) {
+            $ext = strtolower($tmp[count($tmp)-1]);
+            if (is_file($filedir.$file) && in_array($ext,$ext_array)) {
+              if ($max_files >= $offset && $max_files < $limit) {
+                $files[$max_files] = array(
+                  'id' => $file,
+                  'text' => $file
+                );
+              }
+              $this->data_volume += filesize($filedir.$file);
+              $max_files ++;
+            }
+          }
+        }
+        closedir($dir);
+      }
+      
+      $this->max_files = $max_files;
+      $this->files = $files;
+    }
+
+    function getMemoryLimitBytes() {
+      $limit = ini_get('memory_limit');
+      if ($limit == -1) return 0;
+    
+      $units = array(1 => 'K', 'M', 'G');
+      $unit = strtoupper(substr($limit, -1));
+      if ($exp = array_search($unit, $units)) {
+        return (int)substr($limit, 0, -1) * pow(1024, $exp);
+      } else {
+        return (int)$limit;
+      }
+    }
+
+    function image_processing_do() {
+      
+      include ('includes/classes/'.FILENAME_IMAGEMANIPULATOR);
+
+      $offset = (int)$_POST['start'];
+      $step = (int)$_POST['max_datasets'];
+      $count = isset($_POST['count']) ? (int)$_POST['count'] : 0;
+      $limit = $offset + $step;
+       
+      // set memory limit
+      $memory_limit = $this->getMemoryLimitBytes();
+      if ($memory_limit > 0
+          && $memory_limit < (256 * 1024 * 1024)
+          )
+      {
+        ini_set('memory_limit', '256M');
+      }
+      
+      // set timeout
+      xtc_set_time_limit(0);
+
+      $rData = array();
+      if ((!isset($_POST['process_type']) || (!isset($_POST[$_POST['process_type']]) && !isset($_POST[$_POST['process_type'].'_image']))) && $_POST['start'] == 0) {
+        $rData['start'] = 0;
+        $rData['total'] = 0;
+        $rData['count'] = 0;
+
+        return $rData;
+      }      
+
+      switch ($_POST['process_type']) {
+        case 'products':
+          $this->get_images_files(DIR_FS_CATALOG_IMAGES.'product_images/original_images/',$offset,$limit);
+          break;
+        case 'categories':
+          $this->get_images_files(DIR_FS_CATALOG_IMAGES.'categories/original_images/',$offset,$limit);
+          break;
+        case 'manufacturers':
+          $this->get_images_files(DIR_FS_CATALOG_IMAGES.'manufacturers/original_images/',$offset,$limit);
+          break;
+        case 'banners':
+          $this->get_images_files(DIR_FS_CATALOG_IMAGES.'banner/original_images/',$offset,$limit);
+          break;
+      }
+
+      $files = $this->files;
+
+      $ext_search = array('.GIF','.JPG','.JPEG','.PNG');
+      $ext_replace = array('.gif','.jpg','.jpeg','.png');
+      
+      for ($i = $offset; $i < $limit; $i++) {
+        if ($i >= $this->max_files) {
+          $rData['start'] = $limit;
+          $rData['count'] = $count;
+          return $rData;
+        }
+        $image_name = $image_name_process = $files[$i]['text'];
+
+        if (isset($_POST['lower_file_ext']) && $_POST['lower_file_ext'] == 1) {
+          $new_image_name = str_replace($ext_search, $ext_replace , $image_name);
+          
+          if ($image_name != $new_image_name) {
+            switch ($_POST['process_type']) {
+              case 'products':
+                if (is_file(DIR_FS_CATALOG_IMAGES.'product_images/original_images/'.$image_name)) {
+                  rename(DIR_FS_CATALOG_IMAGES.'product_images/original_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'product_images/original_images/'.$new_image_name);
+                  
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'product_images/mini_images/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'product_images/mini_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'product_images/mini_images/'.$new_image_name);
+                  }
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'product_images/thumbnail_images/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'product_images/thumbnail_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'product_images/thumbnail_images/'.$new_image_name);
+                  }
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'product_images/midi_images/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'product_images/midi_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'product_images/midi_images/'.$new_image_name);
+                  }
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'product_images/info_images/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'product_images/info_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'product_images/info_images/'.$new_image_name);
+                  }
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'product_images/popup_images/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'product_images/popup_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'product_images/popup_images/'.$new_image_name);
+                  }
+                
+                  xtc_db_query("UPDATE ".TABLE_PRODUCTS."
+                                   SET products_image = '".xtc_db_input($new_image_name)."'
+                                 WHERE products_image = '".xtc_db_input($image_name)."'");
+
+                  xtc_db_query("UPDATE ".TABLE_PRODUCTS_IMAGES."
+                                   SET image_name = '".xtc_db_input($new_image_name)."'
+                                 WHERE image_name = '".xtc_db_input($image_name)."'");
+                }
+                break;
+              
+              case 'categories':
+                if (is_file(DIR_FS_CATALOG_IMAGES.'categories/original_images/'.$image_name)) {
+                  rename(DIR_FS_CATALOG_IMAGES.'categories/original_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'categories/original_images/'.$new_image_name);
+
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'categories/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'categories/'.$image_name, DIR_FS_CATALOG_IMAGES.'categories/'.$new_image_name);
+                  }
+
+                  xtc_db_query("UPDATE ".TABLE_CATEGORIES."
+                                   SET categories_image = '".xtc_db_input($new_image_name)."'
+                                 WHERE categories_image = '".xtc_db_input($image_name)."'");
+
+                  xtc_db_query("UPDATE ".TABLE_CATEGORIES."
+                                   SET categories_image_mobile = '".xtc_db_input($new_image_name)."'
+                                 WHERE categories_image_mobile = '".xtc_db_input($image_name)."'");
+
+                  xtc_db_query("UPDATE ".TABLE_CATEGORIES."
+                                   SET categories_image_list = '".xtc_db_input($new_image_name)."'
+                                 WHERE categories_image_list = '".xtc_db_input($image_name)."'");                  
+                }
+                break;
+              
+              case 'manufacturers':
+                if (is_file(DIR_FS_CATALOG_IMAGES.'manufacturers/original_images/'.$image_name)) {
+                  rename(DIR_FS_CATALOG_IMAGES.'manufacturers/original_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'manufacturers/original_images/'.$new_image_name);
+
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'manufacturers/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'manufacturers/'.$image_name, DIR_FS_CATALOG_IMAGES.'manufacturers/'.$new_image_name);
+                  }
+
+                  xtc_db_query("UPDATE ".TABLE_MANUFACTURERS."
+                                   SET manufacturers_image = '".xtc_db_input($new_image_name)."'
+                                 WHERE manufacturers_image = '".xtc_db_input($image_name)."'");
+                }                
+                break;
+              
+              case 'banners':
+                if (is_file(DIR_FS_CATALOG_IMAGES.'banner/original_images/'.$image_name)) {
+                  rename(DIR_FS_CATALOG_IMAGES.'banner/original_images/'.$image_name, DIR_FS_CATALOG_IMAGES.'banner/original_images/'.$new_image_name);
+
+                  if (is_file(DIR_FS_CATALOG_IMAGES.'banner/'.$image_name)) {
+                    rename(DIR_FS_CATALOG_IMAGES.'banner/'.$image_name, DIR_FS_CATALOG_IMAGES.'banner/'.$new_image_name);
+                  }
+
+                  xtc_db_query("UPDATE ".TABLE_BANNERS."
+                                   SET banners_image = '".xtc_db_input($new_image_name)."'
+                                 WHERE banners_image = '".xtc_db_input($image_name)."'");
+
+                  xtc_db_query("UPDATE ".TABLE_BANNERS."
+                                   SET banners_image_mobile = '".xtc_db_input($new_image_name)."'
+                                 WHERE banners_image_mobile = '".xtc_db_input($image_name)."'");
+                }                
+                break;
+            }
+            $image_name = $image_name_process = $new_image_name;
+          }
+        }
+        
+        if (isset($_POST['logging']) && $_POST['logging'] == 1) {
+          $handle = fopen($this->logfile, "a"); fwrite($handle, $image_name. '|read'."\n"); fclose($handle);
+        }
+
+        if (isset($_POST['only_missing_images']) && $_POST['only_missing_images'] == 1) {
+          $flag = false;
+          switch ($_POST['process_type']) {
+            case 'products':
+              if (isset($_POST['products'])) {
+                foreach ($_POST['products'] as $images_type => $val) {
+                  if (!is_file(DIR_FS_CATALOG_IMAGES.'product_images/'.$images_type.'/'.$image_name_process)) {
+                    $products_image_name = $image_name;
+                    $products_image_name_process = $image_name_process;
+                    require(DIR_WS_INCLUDES.'product_'.$images_type.'.php'); 
+                    $flag = true;
+                  }
+                }
+              }
+              break;
+
+            case 'categories':
+              if (isset($_POST['categories_image'])) {
+                $image_process_type = $this->get_image_process_type($image_name);
+                foreach ($_POST['categories_image'] as $images_type => $val) {
+                  if ($images_type == $image_process_type
+                      && !is_file(DIR_FS_CATALOG_IMAGES.'categories/'.$image_name_process)
+                      )
+                  {
+                    $categories_image_name = $image_name;
+                    $categories_image_name_process = $image_name_process;
+                    require(DIR_WS_INCLUDES.'categories_image'.(($image_process_type != '_default') ? $image_process_type : '').'.php');
+                    $flag = true;
+                  }
+                }
+              }
+              break;
+
+            case 'manufacturers':
+              if (isset($_POST['manufacturers'])
+                  && !is_file(DIR_FS_CATALOG_IMAGES.'manufacturers/'.$image_name_process)
+                  )
+              {
+                $manufacturers_image_name = $image_name;
+                $manufacturers_image_name_process = $image_name_process;
+                require(DIR_WS_INCLUDES . 'manufacturers_image.php'); 
+              }
+              break;
+
+            case 'banners':
+              if (isset($_POST['banners_image'])) {
+                $image_process_type = $this->get_image_process_type($image_name);
+                foreach ($_POST['banners_image'] as $images_type => $val) {
+                  if ($images_type == $image_process_type
+                      && !is_file(DIR_FS_CATALOG_IMAGES.'banner/'.$image_name_process)
+                      )
+                  {
+                    $banners_image_name = $image_name;
+                    $banners_image_name_process = $image_name_process;
+                    require(DIR_WS_INCLUDES.'banners_image'.(($image_process_type != '_default') ? $image_process_type : '').'.php');
+                    $flag = true;
+                  }
+                }
+              }
+              break;
+          }
+          if ($flag) {
+            $count += 1;
+            if (isset($_POST['logging']) && $_POST['logging'] == 1) {
+              $handle = fopen($this->logfile, "a"); fwrite($handle, $image_name.'|processed'."\n"); fclose($handle);
+            }  
+          }
+        } else {
+          switch ($_POST['process_type']) {
+            case 'products':
+              if (isset($_POST['products'])) {
+                foreach ($_POST['products'] as $images_type => $val) {
+                  $products_image_name = $image_name;
+                  $products_image_name_process = $image_name_process;
+                  require(DIR_WS_INCLUDES . 'product_'.$images_type.'.php'); 
+                }
+              }
+              break;
+
+            case 'categories':
+              if (isset($_POST['categories_image'])) {
+                $image_process_type = $this->get_image_process_type($image_name);
+                foreach ($_POST['categories_image'] as $images_type => $val) {
+                  if ($images_type == $image_process_type) {
+                    $categories_image_name = $image_name;
+                    $categories_image_name_process = $image_name_process;
+                    require(DIR_WS_INCLUDES.'categories_image'.(($image_process_type != '_default') ? $image_process_type : '').'.php');
+                  }
+                }
+              }
+              break;
+
+            case 'manufacturers':
+              if (isset($_POST['manufacturers'])) {
+                $manufacturers_image_name = $image_name;
+                $manufacturers_image_name_process = $image_name_process;
+                require(DIR_WS_INCLUDES . 'manufacturers_image.php'); 
+              }
+              break;
+            
+            case 'banners':
+              if (isset($_POST['banners_image'])) {
+                $image_process_type = $this->get_image_process_type($image_name);
+                foreach ($_POST['banners_image'] as $images_type => $val) {
+                  if ($images_type == $image_process_type) {
+                    $banners_image_name = $image_name;
+                    $banners_image_name_process = $image_name_process;
+                    require(DIR_WS_INCLUDES.'banners_image'.(($image_process_type != '_default') ? $image_process_type : '').'.php');
+                  }
+                }
+              }
+              break;
+          }
+          $count ++;
+          if (isset($_POST['logging']) && $_POST['logging'] == 1) {
+            $handle = fopen($this->logfile, "a"); fwrite($handle, $image_name.'|processed'."\n"); fclose($handle);
+          }
+        }
+      }
+
+      $rData['start'] = $limit;
+      $rData['count'] = $count;
+      return $rData;
+    }
+    
+    function get_image_process_type($image_name) {
+      foreach ($this->images_type_array as $type) {
+        if ($type != '' && strpos($image_name, $type.'.') !== false) {
+          return $type;
+        }
+      }
+      return '_default';
+    }
+    
+    function custom() {
+      $rData = $this->image_processing_do();
+      $json = array_merge($_POST,$rData);
+      echo json_encode($json);
+      exit();
+    }
+
+    function process($file) {
+      //do nothing
+    }
+
+    function display() {
+      $max_array = array (array ('id' => '1', 'text' => '1'));
+      $max_array[] = array ('id' => '5', 'text' => '5');
+      $max_array[] = array ('id' => '10', 'text' => '10');
+      $max_array[] = array ('id' => '15', 'text' => '15');
+      $max_array[] = array ('id' => '20', 'text' => '20');
+      $max_array[] = array ('id' => '50', 'text' => '50');
+      
+      $process_type_array = array();
+      $process_type_array[] = array ('id' => 'products', 'text' => MODULE_STEP_IMAGE_PROCESS_TEXT_PRODUCTS);
+      $process_type_array[] = array ('id' => 'categories', 'text' => MODULE_STEP_IMAGE_PROCESS_TEXT_CATEGORIES);
+      $process_type_array[] = array ('id' => 'manufacturers', 'text' => MODULE_STEP_IMAGE_PROCESS_TEXT_MANUFACTURERS);
+      $process_type_array[] = array ('id' => 'banners', 'text' => MODULE_STEP_IMAGE_PROCESS_TEXT_BANNERS);
+
+      $this->get_images_files(DIR_FS_CATALOG_IMAGES.'product_images/original_images/', 1, 1);
+      $max_files_products = $this->max_files;
+      $data_volume_products = $this->data_volume;
+
+      $this->get_images_files(DIR_FS_CATALOG_IMAGES.'categories/original_images/', 1, 1);
+      $max_files_categories = $this->max_files;
+      $data_volume_categories = $this->data_volume;
+
+      $this->get_images_files(DIR_FS_CATALOG_IMAGES.'manufacturers/original_images/', 1, 1);
+      $max_files_manufacturers = $this->max_files;
+      $data_volume_manufacturers = $this->data_volume;
+
+      $this->get_images_files(DIR_FS_CATALOG_IMAGES.'banner/original_images/', 1, 1);
+      $max_files_banners = $this->max_files;
+      $data_volume_banners = $this->data_volume;
+      
+      require (DIR_WS_INCLUDES.'javascript/jquery.image_processing.js.php');
+      
+      $ajax_img = '<img src="images/loading.gif" class="ajax_loading">';
+
+      return array('text' => xtc_draw_hidden_field('process','module_processing_do').
+                             xtc_draw_hidden_field('ajax_url',xtc_href_link($this->module_filename, 'set=' . $_GET['set'] . '&module='.$this->code). '&action=custom').
+                             xtc_draw_hidden_field('ajax','1').
+                             xtc_draw_hidden_field('start','0').
+                             '<input id="total" type="hidden" name="total" value="'.(int)$max_files_products.'"/>'.
+                             MODULE_STEP_IMAGE_PROCESS_TEXT_IMAGE_EXPORT_TYPE.'<br />'.
+                             MODULE_STEP_IMAGE_PROCESS_TEXT_IMAGE_EXPORT.'<br />'.
+                             
+                             '<br />'.MODULE_STEP_IMAGE_PROCESS_TEXT_MAX_IMAGES.
+                             '<br />' . xtc_draw_pull_down_menu('max_datasets', $max_array, '5') . '<br />'.
+
+                             '<br />'.MODULE_STEP_IMAGE_PROCESS_TEXT_PROCESS_TYPE.
+                             '<br />' . xtc_draw_pull_down_menu('process_type', $process_type_array, 'products', 'id="process_type"') . '<br />'.
+
+                             '<div id="products">' . 
+                               '<br />' . sprintf(MODULE_STEP_IMAGE_PROCESS_TEXT_COUNT_INFO, 'original_images', '<span id="products_total">'.$max_files_products.'</span>') . '['.$this->formatBytes($data_volume_products).']'.'<br />'.
+                               '<br />' . xtc_draw_checkbox_field('products[mini_images]', '1', false, '', 'class="mini_images"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_PRODUCTS_MINI_IMAGES.
+                               '<br />' . xtc_draw_checkbox_field('products[thumbnail_images]', '1', false, '', 'class="thumbnail_images"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_PRODUCTS_THUMBNAIL_IMAGES.
+                               '<br />' . xtc_draw_checkbox_field('products[midi_images]', '1', false, '', 'class="midi_images"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_PRODUCTS_MIDI_IMAGES.
+                               '<br />' . xtc_draw_checkbox_field('products[info_images]', '1', false, '', 'class="info_images"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_PRODUCTS_INFO_IMAGES. 
+                               '<br />' . xtc_draw_checkbox_field('products[popup_images]', '1', false, '', 'class="popup_images"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_PRODUCTS_POPUP_IMAGES. 
+                             '</div>' .
+
+                             '<div id="categories" style="display:none;">' . 
+                               '<br />' . sprintf(MODULE_STEP_IMAGE_PROCESS_TEXT_COUNT_INFO, 'original_images', '<span id="categories_total">'.$max_files_categories.'</span>') . '['.$this->formatBytes($data_volume_categories).']'.'<br />'.
+                               '<br />' . xtc_draw_checkbox_field('categories_image[_default]', '1', false) . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_CATEGORIES_IMAGES.
+                               '<br />' . xtc_draw_checkbox_field('categories_image[_list]', '1', false) . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_CATEGORIES_LIST_IMAGES.
+                               '<br />' . xtc_draw_checkbox_field('categories_image[_mobile]', '1', false) . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_CATEGORIES_MOBILE_IMAGES.
+                             '</div>' .
+
+                             '<div id="manufacturers" style="display:none;">' . 
+                               '<br />' . sprintf(MODULE_STEP_IMAGE_PROCESS_TEXT_COUNT_INFO, 'original_images', '<span id="manufacturers_total">'.$max_files_manufacturers.'</span>') . '['.$this->formatBytes($data_volume_manufacturers).']'.'<br />'.
+                               '<br />' . xtc_draw_checkbox_field('manufacturers', '1', false) . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_MANUFACTURERS_IMAGES.
+                             '</div>' .
+
+                             '<div id="banners" style="display:none;">' . 
+                               '<br />' . sprintf(MODULE_STEP_IMAGE_PROCESS_TEXT_COUNT_INFO, 'original_images', '<span id="banners_total">'.$max_files_banners.'</span>') . '['.$this->formatBytes($data_volume_banners).']'.'<br />'.
+                               '<br />' . xtc_draw_checkbox_field('banners_image[_default]', '1', false) . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_BANNERS_IMAGES.
+                               '<br />' . xtc_draw_checkbox_field('banners_image[_mobile]', '1', false) . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_BANNERS_MOBILE_IMAGES.
+                             '</div>' .
+
+                             '<br />'.MODULE_STEP_IMAGE_PROCESS_TEXT_SETTINGS.
+                             '<br />' . xtc_draw_checkbox_field('only_missing_images', '1', false, '', 'class="only_missing_images"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_ONLY_MISSING_IMAGES.
+                             '<br />' . xtc_draw_checkbox_field('lower_file_ext', '1', false, '', 'class="lower_file_ext"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_LOWER_FILE_EXT. '<br />'.
+                             
+                             '<br />'.MODULE_STEP_IMAGE_PROCESS_TEXT_LOGGING.
+                             '<br />' . xtc_draw_checkbox_field('logging', '1', false, '', 'class="logfile"') . ' ' . MODULE_STEP_IMAGE_PROCESS_TEXT_LOGFILE. '<br />'.
+                             
+                             '<br />' . xtc_button(BUTTON_START). '&nbsp;' .
+                             xtc_button_link(BUTTON_CANCEL, xtc_href_link($this->module_filename, 'set=' . $_GET['set'] . '&module='.$this->code)) .
+                             
+                             '<div class="ajax_response" style="margin-bottom:15px;"><hr>'.
+                             '<div class="ajax_imgname"></div>'.
+                               sprintf(MODULE_STEP_READY_STYLE_TEXT,$ajax_img . MODULE_STEP_IMAGE_PROCESS_TEXT_STEP_INFO . '<span class="ajax_count"></span> / <span id="ajax_total">' .(int)$max_files_products . '</span><span class="ajax_ready_info">' . MODULE_STEP_IMAGE_PROCESS_TEXT_STEP_INFO_READY .'<span>') . 
+                               '<div class="process_wrapper">
+                                <div class="process_inner_wrapper">
+                                  <div id="show_image_process" style="width:'. 0 .'%;"></div>
+                                </div>
+                               </div>
+                               <div class="ajax_btn_back">'.sprintf(MODULE_STEP_READY_STYLE_BACK,xtc_button_link(BUTTON_BACK, xtc_href_link(FILENAME_MODULE_EXPORT, 'set=' . $_GET['set'] . '&module='.$this->code))).'</div>
+                             </div>
+                             <script>
+                              $("#process_type").on("change", function() {
+                                var selector = $(this).val();
+                                var total = parseInt($("#"+selector+"_total").text());
+                                                        
+                                $("#products, #categories, #manufacturers, #banners, .ajax_response").hide();
+                                $("#"+selector).show();
+                                $("#total").val(total);
+                                $("#ajax_total").text(total);
+                              });
+                             </script>
+                             '
+                   );
+    }
+
+    function check() {
+      if (!isset($this->_check)) {
+        if (defined('MODULE_STEP_IMAGE_PROCESS_STATUS')) {
+          $this->_check = true;
+        } else {
+          $check_query = xtc_db_query("SELECT configuration_value 
+                                         FROM " . TABLE_CONFIGURATION . " 
+                                        WHERE configuration_key = 'MODULE_STEP_IMAGE_PROCESS_STATUS'");
+          $this->_check = xtc_db_num_rows($check_query);
+        }
+      }
+      return $this->_check;
+    }
+
+    function install() {
+      xtc_db_query("insert into " . TABLE_CONFIGURATION . " (configuration_key, configuration_value,  configuration_group_id, sort_order, set_function, date_added) values ('MODULE_STEP_IMAGE_PROCESS_STATUS', 'True',  '6', '1', 'xtc_cfg_select_option(array(\'True\', \'False\'), ', now())");
+    }
+
+    function remove() {
+      xtc_db_query("delete from " . TABLE_CONFIGURATION . " where configuration_key in ('" . implode("', '", $this->keys()) . "')");
+    }
+
+    function keys() {
+      return array('MODULE_STEP_IMAGE_PROCESS_STATUS');
+    }
+    
+    function formatBytes($bytes, $precision = 2) {
+        $units = array('B', 'KB', 'MB', 'GB', 'TB');
+
+        $bytes = max($bytes, 0);
+        $pow = floor(($bytes ? log($bytes) : 0) / log(1024));
+        $pow = min($pow, count($units) - 1);
+
+        $bytes /= pow(1024, $pow);
+
+        return round($bytes, $precision) . ' ' . $units[$pow];
+    }
+  }

@@ -1,0 +1,556 @@
+<?php
+/**
+ * 888888ba                 dP  .88888.                    dP
+ * 88    `8b                88 d8'   `88                   88
+ * 88aaaa8P' .d8888b. .d888b88 88        .d8888b. .d8888b. 88  .dP  .d8888b.
+ * 88   `8b. 88ooood8 88'  `88 88   YP88 88ooood8 88'  `"" 88888"   88'  `88
+ * 88     88 88.  ... 88.  .88 Y8.   .88 88.  ... 88.  ... 88  `8b. 88.  .88
+ * dP     dP `88888P' `88888P8  `88888'  `88888P' `88888P' dP   `YP `88888P'
+ *
+ *                          m a g n a l i s t e r
+ *                                      boost your Online-Shop
+ *
+ * -----------------------------------------------------------------------------
+ * $Id$
+ *
+ * (c) 2010 - 2014 RedGecko GmbH -- http://www.redgecko.de
+ *     Released under the MIT License (Expat)
+ * -----------------------------------------------------------------------------
+ */
+
+require_once(DIR_MAGNALISTER_MODULES.'magnacompatible/AttributesMatchingHelper.php');
+
+class AmazonHelper extends AttributesMatchingHelper {
+
+    private static $instance;
+
+    public static function gi()
+    {
+        if (self::$instance === null) {
+            self::$instance = new AmazonHelper();
+        }
+
+        return self::$instance;
+    }
+
+	public static function processCheckinErrors($result, $mpID) {
+		// Empty is ok, the API has a method to fetch the error log later.
+	}
+
+	public static function loadPriceSettings($mpId) {
+		$mp = magnaGetMarketplaceByID($mpId);
+
+		$config = array(
+			'AddKind' => getDBConfigValue($mp.'.price.addkind', $mpId, 'percent'),
+			'Factor'  => (float)getDBConfigValue($mp.'.price.factor', $mpId, 0),
+			'Signal'  => getDBConfigValue($mp.'.price.signal', $mpId, ''),
+			'Group'   => getDBConfigValue($mp.'.price.group', $mpId, ''),
+			'UseSpecialOffer' => getDBConfigValue(array($mp.'.price.usespecialoffer', 'val'), $mpId, false),
+			'Currency' => getCurrencyFromMarketplace($mpId),
+			'ConvertCurrency' => getDBConfigValue(array($mp.'.exchangerate', 'update'), $mpId, false),
+		);
+
+		return $config;
+	}
+
+	public static function loadQuantitySettings($mpId) {
+		$mp = magnaGetMarketplaceByID($mpId);
+
+		$config = array(
+			'Type'  => getDBConfigValue($mp.'.quantity.type', $mpId, 'lump'),
+			'Value' => (int)getDBConfigValue($mp.'.quantity.value', $mpId, 0),
+			'MaxQuantity' => (int)getDBConfigValue($mp.'.quantity.maxquantity', $mpId, 0),
+		);
+
+		return $config;
+	}
+
+    protected function isProductPrepared($category, $prepare = false)
+    {
+        if (getDBConfigValue('general.keytype', '0') == 'artNr') {
+            $sSQLAnd = ' AND products_model = "'.$prepare.'"';
+        } else {
+            $sSQLAnd = ' AND products_id = "'. $prepare . '"';
+        }
+
+        if ($prepare) {
+            $dataFromDB = MagnaDB::gi()->fetchRow(eecho('
+					SELECT `products_id`
+					FROM '.TABLE_MAGNA_AMAZON_APPLY.'
+					WHERE mpID = '.$this->mpId.'
+						AND topMainCategory = "'.$category.'"
+						' . $sSQLAnd . '
+					LIMIT 1
+				', false)
+            );
+
+            return !empty($dataFromDB['products_id']);
+        }
+
+        return false;
+    }
+
+    protected function getPreparedData($category, $prepare = false, $customIdentifier = '')
+    {
+        if (!$prepare) {
+            return false;
+        }
+
+        $availableCustomConfigs = false;
+
+	    if (getDBConfigValue('general.keytype', '0') == 'artNr') {
+		    $sSQLAnd = ' AND products_model = "'.$prepare.'"';
+	    } else {
+		    $sSQLAnd = ' AND products_id = "'. $prepare . '"';
+	    }
+
+        if ($prepare) {
+	        $dataFromDB = MagnaDB::gi()->fetchRow(eecho('
+				SELECT `data`, `topProductType`, `DataId`
+				FROM ' . TABLE_MAGNA_AMAZON_APPLY . '
+				WHERE mpID = ' . $this->mpId . '
+					AND topMainCategory = "' . $category . '"
+					'.$sSQLAnd.'
+			', false));
+
+	        if (!$dataFromDB) {
+		        return false;
+	        }
+
+	        $dataDB = unserialize(base64_decode($dataFromDB['data']));
+
+            // fix for prepare because it was set as an attribute (but we have separate column in db)
+            if (isset($dataDB['Attributes']) && (count($dataDB['Attributes']) == 1) && isset($dataDB['Attributes']['MerchantShippingGroupName'])) {
+                unset($dataDB['Attributes']['MerchantShippingGroupName']);
+            }
+
+            // V3 approach: PRIMARY load from DataId (new format), FALLBACK to data column (old format)
+            $shopVariationData = null;
+
+            // PRIMARY: Try to load from longtext table (new format)
+            if (!empty($dataFromDB['DataId'])) {
+                $longtextRow = MagnaDB::gi()->fetchRow("
+			        SELECT Value
+			        FROM magnalister_amazon_prepare_longtext
+			        WHERE TextId = '" . MagnaDB::gi()->escape($dataFromDB['DataId']) . "'
+			          AND ReferenceFieldName = 'data'
+		        ");
+                if (!empty($longtextRow['Value'])) {
+                    $shopVariationData = $longtextRow['Value'];
+                }
+            }
+
+            // FALLBACK: If not found in longtext, try old format from data column
+            if (empty($shopVariationData) && isset($dataDB['ShopVariation'])) {
+                $shopVariationData = $dataDB['ShopVariation'];
+            }
+
+            // Set the final ShopVariation data
+            if (!empty($shopVariationData)) {
+                $dataDB['ShopVariation'] = $shopVariationData;
+            }
+
+	        if (!empty($dataDB['ShopVariation'])) {
+		        if (is_array($dataDB['ShopVariation'])) {
+			        $availableCustomConfigs = $dataDB['ShopVariation'];
+		        } else {
+			        $availableCustomConfigs = json_decode($dataDB['ShopVariation'], true);
+		        }
+	        } elseif (!empty($dataDB['Attributes'])) {
+		        foreach ($dataDB['Attributes'] as $attributeKey => $attributeValue) {
+			        $availableCustomConfigs[$attributeKey] = array(
+				        'Kind' => 'Matching',
+				        'Values' => $attributeValue,
+				        'Error' => false
+			        );
+		        }
+	        }
+        }
+
+        return !$availableCustomConfigs ? null : $availableCustomConfigs;
+    }
+
+    /**
+     * Gets prepared attributes data for products prepared for given category.
+     *
+     * @param string $category
+     * @param string $customIdentifier
+     * @return array|null
+     */
+    protected function getPreparedProductsData($category, $customIdentifier = '') {
+	// LIMIT 4096 to prevent unprocessable long data
+        $dataFromDB = MagnaDB::gi()->fetchArray(eecho('
+				SELECT `data`, `topProductType`, `DataId`
+				 FROM ' . TABLE_MAGNA_AMAZON_APPLY . '
+				 WHERE mpID = ' . $this->mpId . '
+				 AND topMainCategory = "' . $category . '"
+				 ORDER BY products_id DESC LIMIT 4096
+			', false), true);
+
+        if ($dataFromDB) {
+            $result = array();
+            foreach ($dataFromDB as $preparedData) {
+                $data = unserialize(base64_decode($preparedData['data']));
+                $shopVariationData = null;
+
+                // V3 approach: PRIMARY load from DataId (new format), FALLBACK to data column (old format)
+                // PRIMARY: Try to load from longtext table (new format)
+                if (!empty($preparedData['DataId'])) {
+                    $longtextRow = MagnaDB::gi()->fetchRow("
+                        SELECT Value
+                        FROM magnalister_amazon_prepare_longtext
+                        WHERE TextId = '" . MagnaDB::gi()->escape($preparedData['DataId']) . "'
+                          AND ReferenceFieldName = 'data'
+                    ");
+                    if (!empty($longtextRow['Value'])) {
+                        $shopVariationData = $longtextRow['Value'];
+                    }
+                }
+
+                // FALLBACK: If not found in longtext, try old format from data column
+                if (empty($shopVariationData) && isset($data['ShopVariation'])) {
+                    $shopVariationData = $data['ShopVariation'];
+                }
+
+                // Set the final ShopVariation data
+                if (!empty($shopVariationData)) {
+                    $data['ShopVariation'] = $shopVariationData;
+                }
+
+                if ($data['ShopVariation'] && isset($dataFromDB['topProductType']) && ($customIdentifier == $dataFromDB['topProductType'])) {
+                    $result[] = json_decode($data['ShopVariation'], true);
+                }
+            }
+
+            return $result;
+        }
+
+        return null;
+    }
+
+    public function getCustomIdentifiers($category, $prepare = false, $getDate = false)
+    {
+	    return $this->getCategoryDetails($category);
+    }
+
+    public function getAttributesFromMP($category, $additionalData = null, $customIdentifier = '')
+    {
+        $data = false;
+        try {
+            $result = MagnaConnector::gi()->submitRequest(array(
+                'ACTION' => 'GetCategoryDetails',
+                'MARKETPLACEID' => $this->mpId,
+                'DATA' => array(
+                    'PRODUCTTYPE' => $category,
+                    'INCLUDE_CONDITIONAL_RULES' => true
+                ),
+            ));
+            if (!empty($result['DATA'])) {
+                $data = $result['DATA'];
+                if (getDBConfigValue('amazon.site', $this->mpId) === 'US') {
+                    $data['attributes']['UPC'] = array(
+                        'title' => 'UPC',
+                        'mandatory' => true,
+                    );
+                }
+                // add variation theme to skip all variations
+                $data['variation_details']['skip_variations'] = array(
+                    'name' => ML_GENERAL_VARIATION_THEME_SKIP_VARIATIONS,
+                    'attributes' => array(),
+                );
+            }
+        } catch (MagnaException $e) {
+            $e->setCriticalStatus(false);
+        }
+
+        if (!is_array($data) || !isset($data['attributes'])) {
+            $data = array();
+        }
+
+        if (!empty($data['attributes'])) {
+            foreach ($data['attributes'] as &$value) {
+                if (!isset($value['mandatory'] )) {
+                    $value['mandatory'] = true;
+                }
+            }
+        } else {
+            $data['attributes'] = array();
+        }
+
+        return $data;
+    }
+
+	private function renderCustomIdentifierOptions()
+	{
+		$noProductTypeOption = '<option value="">'.ML_AMAZON_LABEL_APPLY_PLEASE_SELECT.'</option>' . "\n";
+
+        $category = isset($_POST['PrimaryCategory']) ? $_POST['PrimaryCategory'] : null;
+        $customIdentifier = isset($_POST['CustomIdentifier']) ? $_POST['CustomIdentifier'] : null;
+		if (empty($category)) {
+			return $noProductTypeOption;
+		}
+
+		$productTypes = $this->getCategoryDetails($category);
+
+		$out = '';
+		foreach ($productTypes as $productTypeKey => $productType) {
+			$selected = ($productTypeKey == $customIdentifier) ? 'selected="selected"' : '';
+			$out .= '<option value="'.fixHTMLUTF8Entities($productTypeKey).'" '.$selected.'>'.fixHTMLUTF8Entities($productType).'</option>' . "\n";
+		}
+
+		return !empty($out) ? $out : $noProductTypeOption;
+	}
+
+    public function saveMatching($category, &$matching, $savePrepare, $fromPrepare,
+         $validateCustomAttributesNumber, $variationThemeKeyAttributes = null, $sCustomIdentifier = ''
+    ) {
+        $errors = parent::saveMatching($category, $matching, $savePrepare, $fromPrepare,
+            $validateCustomAttributesNumber, $variationThemeKeyAttributes, $sCustomIdentifier);
+
+        if (!$fromPrepare) {
+            return $errors;
+        }
+
+        $result = '';
+        if (!empty($errors)) {
+            foreach ($errors as $error) {
+                $errorCssClass = 'errorBox';
+                $errorMessage = $error;
+                if (is_array($error)) {
+                    $errorCssClass = "{$error['type']}Box {$error['additionalCssClass']}";
+                    $errorMessage = $error['message'];
+                }
+
+                $result .= '<p class="'.$errorCssClass.'">' . $errorMessage . '</p>';
+            }
+        } else if (!$fromPrepare) {
+            $result = '<p class="successBox">' . ML_LABEL_SAVED_SUCCESSFULLY . '</p>';
+        }
+
+        if ($result) {
+            // on apply page we need errors in POST to display them properly
+            $_POST['Errors'] = $result;
+        }
+
+        return json_encode($matching['ShopVariation']);
+    }
+
+    private function getCategoryDetails($category)
+    {
+        $productTypes = array();
+
+        if (empty($category)) {
+            return $productTypes;
+        }
+
+        try {
+            $result = MagnaConnector::gi()->submitRequest(array(
+                'ACTION' => 'GetCategoryDetails',
+                'MARKETPLACEID' => $this->mpId,
+                'DATA' => array(
+                    'PRODUCTTYPE'               => $category,
+                    'INCLUDE_CONDITIONAL_RULES' => true
+                ),
+            ));
+
+            if (!empty($result['DATA']['attributes'])) {
+                $productTypes = $result['DATA']['attributes'];
+            }
+
+        } catch (MagnaException $e) {
+            // No product types in this case
+        }
+
+        return $productTypes;
+    }
+
+    protected function getSavedVariationThemeCode($category, $prepare = false)
+    {
+        if (getDBConfigValue('general.keytype', '0') == 'artNr') {
+            $sSQLAnd = ' AND products_model = "'.$prepare.'"';
+        } else {
+            $sSQLAnd = ' AND products_id = "'. $prepare . '"';
+        }
+
+        $variationTheme = null;
+        if ($prepare) {
+            $variationTheme = MagnaDB::gi()->fetchOne(eecho('
+				SELECT variation_theme
+				FROM ' . TABLE_MAGNA_AMAZON_APPLY . '
+				WHERE MpId = ' . $this->mpId . '
+					  AND topMainCategory = "' . $category . '"
+					  ' . $sSQLAnd
+                )
+            );
+        }
+        $variationTheme = json_decode($variationTheme, true);
+
+        return is_array($variationTheme) ? key($variationTheme) : '';
+    }
+
+    /**
+     * Static storage for verification errors from verifyOneItem
+     * These errors will be included in verifyItemByMarketplaceToGetMandatoryAttributes
+     * @var array
+     */
+    protected static $storedVerificationErrors = array();
+
+    /**
+     * Store verification errors from verifyOneItem for later use
+     *
+     * @param array $errors Array of errors from verifyOneItem
+     */
+    public static function storeVerificationErrors($errors) {
+        if (!empty($errors) && is_array($errors)) {
+            self::$storedVerificationErrors = array_merge(self::$storedVerificationErrors, $errors);
+        }
+    }
+
+    /**
+     * Get stored verification errors
+     *
+     * @return array
+     */
+    public static function getStoredVerificationErrors() {
+        return self::$storedVerificationErrors;
+    }
+
+    /**
+     * Clear stored verification errors
+     */
+    public static function clearStoredVerificationErrors() {
+        self::$storedVerificationErrors = array();
+    }
+
+    /**
+     * Converts attribute keys in error messages to clickable scroll links.
+     * Parses patterns like "(Attribute: key1, key2, key3)" and wraps each key
+     * in an anchor tag that scrolls to the corresponding attribute row in React component.
+     *
+     * If the attribute row doesn't exist (optional attribute not yet added),
+     * it will automatically add the attribute via React's magnalisterAddOptionalAttribute()
+     * function, then scroll to it.
+     *
+     * @param string $message The error message containing attribute keys
+     * @return string The message with attribute keys converted to clickable links
+     */
+    public static function convertAttributeKeysToScrollLinks($message) {
+        // Pattern to match (Attribute: key1, key2, ...) or (Attribute: key1)
+        $pattern = '/\(Attribute:\s*([^)]+)\)/';
+
+        return preg_replace_callback($pattern, function ($matches) {
+            $attributesPart = $matches[1];
+            // Split by comma and process each attribute key
+            $keys = array_map('trim', explode(',', $attributesPart));
+            $linkedKeys = array();
+
+            foreach ($keys as $key) {
+                if (!empty($key)) {
+                    $escapedKey = htmlspecialchars($key);
+
+                    // Build onclick handler:
+                    // 1. If element exists -> scroll to it
+                    // 2. If not exists -> add as optional attribute via React, then scroll
+                    $onclick = "(function(e){" . "e.preventDefault();" // Helper function to scroll and highlight
+                        . "function scrollHL(el){" . "el.scrollIntoView({behavior:'smooth',block:'center'});" . "el.style.animation='ml-attr-highlight 0.4s ease-in-out 6';" . "setTimeout(function(){el.style.animation='';},2500);" . "}" // Check if element exists
+                        . "var el=document.getElementById('attr-row-" . $escapedKey . "');" . "if(el){" . "scrollHL(el);" . "}else if(typeof window.magnalisterAddOptionalAttribute==='function'){" // Add optional attribute, then scroll in callback
+                        . "window.magnalisterAddOptionalAttribute('" . $escapedKey . "',function(){" . "setTimeout(function(){" . "var newEl=document.getElementById('attr-row-" . $escapedKey . "');" . "if(newEl){scrollHL(newEl);}" . "},150);" . "});" . "}" . "})(event);return false;";
+
+                    $linkedKeys[] = '<a href="#attr-row-' . $escapedKey . '" ' . 'class="ml-js-noBlockUi ml-attribute-scroll-link" ' . 'data-attribute-key="' . $escapedKey . '" ' . 'onclick="' . $onclick . '"' . 'style="text-decoration:underline;">' . $escapedKey . '</a>';
+                }
+            }
+
+            return '(Attribute: ' . implode(', ', $linkedKeys) . ')';
+        }, $message);
+    }
+
+    /**
+     * Call VerifyAddItems API to detect mandatory attributes (attributes with missing values)
+     * Based on V3: magnalister/Codepool/80_Modules/010_Amazon/Model/Modul.php:389
+     *
+     * Also includes stored verification errors from verifyOneItem and applies
+     * convertAttributeKeysToScrollLinks to error messages.
+     *
+     * @param string $category Main Category (Product Type)
+     * @param string|null $variationTheme Variation Theme (optional)
+     * @return array Array of errors from API response + stored errors
+     */
+    public static function verifyItemByMarketplaceToGetMandatoryAttributes($category, $variationTheme = null) {
+        if (empty($category) || $category === 'none') {
+            // Even if no category, return stored errors if any
+            $storedErrors = self::getStoredVerificationErrors();
+            if (!empty($storedErrors)) {
+                // Apply scroll links to stored errors
+                foreach ($storedErrors as &$error) {
+                    if (isset($error['ERRORMESSAGE'])) {
+                        $error['ERRORMESSAGE'] = self::convertAttributeKeysToScrollLinks($error['ERRORMESSAGE']);
+                    }
+                }
+                return $storedErrors;
+            }
+            return array();
+        }
+
+        try {
+            // Cache key based on category and variation theme
+            static $cache = array();
+            $cacheKey = $category . (!empty($variationTheme) ? '_' . $variationTheme : '');
+
+            if (isset($cache[$cacheKey])) {
+                return $cache[$cacheKey];
+            }
+
+            // Prepare API request
+            $requestParams = array(
+                'ACTION' => 'VerifyAddItems',
+                'MODE'   => 'ATTRIBUTE_MATCHING',
+                'DATA'   => array(
+                    array(
+                        'MainCategory'    => $category,
+                        'variation_theme' => array(
+                            $variationTheme => array()
+                        ),
+                    )
+                )
+            );
+
+            $data = array();
+            try {
+                // Call API - expected to fail with validation errors
+                MagnaConnector::gi()->submitRequest($requestParams);
+            } catch (MagnaException $e) {
+                // Get errors from exception response
+                $response = $e->getResponse();
+                $data = $response;
+            }
+
+            // Extract errors array from API
+            $apiErrors = isset($data['ERRORS']) && is_array($data['ERRORS']) ? $data['ERRORS'] : array();
+
+            // Get stored errors from verifyOneItem
+            $storedErrors = self::getStoredVerificationErrors();
+
+            // Merge API errors with stored errors
+            $allErrors = array_merge($apiErrors, $storedErrors);
+
+            // Apply convertAttributeKeysToScrollLinks to all error messages
+            foreach ($allErrors as &$error) {
+                if (isset($error['ERRORMESSAGE'])) {
+                    $error['ERRORMESSAGE'] = self::convertAttributeKeysToScrollLinks($error['ERRORMESSAGE']);
+                }
+            }
+
+            // Cache result
+            $cache[$cacheKey] = $allErrors;
+
+            return $allErrors;
+
+        } catch (Exception $e) {
+            if (defined('MAGNA_DEBUG') && MAGNA_DEBUG) {
+                error_log('[AmazonHelper] verifyItemByMarketplaceToGetMandatoryAttributes Error: ' . $e->getMessage());
+            }
+        }
+
+        return array();
+    }
+}
