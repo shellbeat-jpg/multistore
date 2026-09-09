@@ -161,83 +161,50 @@ class MultistoreQueryParser {
         return str_ireplace(array_keys($replacements), array_values($replacements), $query);
     }
 
-    private function injectMultistoreFilters_old($query) {
-        $lowerQuery = strtolower($query);
-        $filter2a = defined('MULTISTORE_SQL_SEARCH_WHERE2a') ? MULTISTORE_SQL_SEARCH_WHERE2a : '';
-        $pDescriptionFilter = defined('MULTISTORE_SQL_PDESCRIPTION') ? MULTISTORE_SQL_PDESCRIPTION : '';
-        $injectionPointPattern = '/\s+(group\s+by|order\s+by|limit)\b/i';
-        
-        if (strpos($lowerQuery, TABLE_CATEGORIES) !== false && !empty($filter2a)) {
-            if (strpos($lowerQuery, 'select distinct') === false) {
-                $query = preg_replace('/^select /i', 'SELECT DISTINCT ', $query);
-            }
-            if (strpos($lowerQuery, ' where ') !== false) {
-                $query = preg_replace('/ where /i', ' WHERE 1=1 ' . $filter2a . ' AND ', $query);
-            } else {
-                if (preg_match($injectionPointPattern, $query, $matches, PREG_OFFSET_CAPTURE)) {
-                    $offset = $matches[0][1];
-                    $query = substr($query, 0, $offset) . ' WHERE 1=1 ' . $filter2a . ' ' . substr($query, $offset);
-                } else {
-                    $query .= ' WHERE 1=1 ' . $filter2a;
-                }
-            }
-        }
-
-        if (strpos($lowerQuery, TABLE_PRODUCTS_DESCRIPTION) !== false && !empty($pDescriptionFilter)) {
-            if (strpos($lowerQuery, ' where ') !== false) {
-                $query = preg_replace('/ where /i', ' WHERE 1=1 ' . $pDescriptionFilter . ' AND ', $query);
-            } else {
-                if (preg_match($injectionPointPattern, $query, $matches, PREG_OFFSET_CAPTURE)) {
-                    $offset = $matches[0][1];
-                    $query = substr($query, 0, $offset) . ' WHERE 1=1 ' . $pDescriptionFilter . ' ' . substr($query, $offset);
-                } else {
-                    $query .= ' WHERE 1=1 ' . $pDescriptionFilter;
-                }
-            }
-        }
-
-        return $query;
-    }
-}
     /**
-     * Injiziert Multistore-Bedingungen unter Berücksichtigung dynamischer Tabellen-Aliase
+     * Injiziert Multistore-Bedingungen unter strikter Berücksichtigung von FROM/JOIN-Klauseln und Wortgrenzen
      */
     private function injectMultistoreFilters($query) {
         $lowerQuery = strtolower($query);
         $pDescriptionFilter = defined('MULTISTORE_SQL_PDESCRIPTION') ? MULTISTORE_SQL_PDESCRIPTION : '';
         $injectionPointPattern = '/\s+(group\s+by|order\s+by|limit)\b/i';
         
-        // --- 1. DYNAMISCHE ALIAS-ERKENNUNG FÜR KATEGORIEN ---
-        if (strpos($lowerQuery, TABLE_CATEGORIES) !== false) {
+        // --- 1. PRÄZISE PRÜFUNG & ALIAS-ERKENNUNG FÜR KATEGORIEN ---
+        // Der Regex stellt sicher: Es MUSS ein 'FROM' oder 'JOIN' vor dem Tabellennamen stehen.
+        // \b verhindert das Match von 'categories_id' oder 'categories_description'.
+        $tableCategoriesName = defined('TABLE_CATEGORIES') ? TABLE_CATEGORIES : 'categories';
+        $fromJoinPattern = '/\b(from|join)\s+' . preg_quote($tableCategoriesName, '/') . '\b/i';
+
+        if (preg_match($fromJoinPattern, $query)) {
             
-            // Standard-Filter holen (enthält im Original hartcodiert "c.string_domains")
             $baseFilter = defined('MULTISTORE_SQL_SEARCH_WHERE2a') ? MULTISTORE_SQL_SEARCH_WHERE2a : '';
             
-            // Regex sucht nach: Tabellenname gefolgt von optionalem "AS" und dem Alias-Namen
-            // Beispiel-Treffer: "categories c", "categories cat", "categories AS c"
-            $aliasPattern = '/\b' . preg_quote(TABLE_CATEGORIES, '/') . '\s+(?:as\s+)?([a-z0-0_]+)\b/i';
+            // Holt den exakten Alias direkt hinter dem echten Tabellennamen (z.B. "FROM categories c" oder "FROM categories AS cat")
+            $aliasPattern = '/\b' . preg_quote($tableCategoriesName, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
             
             if (preg_match($aliasPattern, $query, $matches)) {
-                $actualAlias = $matches[1]; // Der gefundene Alias (z. B. "cat" oder "c2")
+                // Falls das nächste Wort ein SQL-Schlüsselwort wie WHERE, JOIN, ON ist, gibt es keinen Alias
+                $forbiddenKeywords = ['where', 'join', 'on', 'group', 'order', 'limit', 'left', 'right', 'inner'];
+                if (in_array(strtolower($matches[1]), $forbiddenKeywords)) {
+                    $actualAlias = $tableCategoriesName;
+                } else {
+                    $actualAlias = $matches[1]; // Gefundener Alias (z.B. "c")
+                }
             } else {
-                $actualAlias = TABLE_CATEGORIES; // Kein Alias gefunden -> Nutze vollen Tabellennamen
+                $actualAlias = $tableCategoriesName; // Kein Alias definiert
             }
 
-            // Wir passen den Filter dynamisch an den gefundenen Alias an!
-            // Ersetzt "c.string_domains" durch den tatsächlichen Alias (z. B. "categories.string_domains")
+            // Wir passen den Filter dynamisch an den isolierten Alias an
             $dynamicFilter = str_replace('c.string_domains', $actualAlias . '.string_domains', $baseFilter);
 
             if (!empty($dynamicFilter)) {
-                // Sicherstellen, dass DISTINCT gesetzt ist, um Duplikate durch Joins zu vermeiden
                 if (strpos($lowerQuery, 'select distinct') === false) {
                     $query = preg_replace('/^select /i', 'SELECT DISTINCT ', $query);
                 }
 
                 if (strpos($lowerQuery, ' where ') !== false) {
-                    // Wenn ein WHERE existiert, hängen wir uns direkt per AND an den Anfang des WHERE-Blocks
                     $query = preg_replace('/ where /i', ' WHERE 1=1 ' . $dynamicFilter . ' AND ', $query);
                 } else {
-                    // Wenn kein WHERE existiert, erzeugen wir eines vor Steuerungsblöcken (GROUP BY etc.)
                     if (preg_match($injectionPointPattern, $query, $matches, PREG_OFFSET_CAPTURE)) {
                         $offset = $matches[0][1];
                         $query = substr($query, 0, $offset) . ' WHERE 1=1 ' . $dynamicFilter . ' ' . substr($query, $offset);
@@ -248,16 +215,27 @@ class MultistoreQueryParser {
             }
         }
 
-        // --- 2. PRODUKT-BESCHREIBUNGEN FILTER (PRODUKTIV-BESTAND) ---
-        if (strpos($lowerQuery, TABLE_PRODUCTS_DESCRIPTION) !== false && !empty($pDescriptionFilter)) {
-            // Hier analog prüfen, falls auch "pd" mal abweicht (Standard bei modified ist fast immer "pd")
-            $pdAliasPattern = '/\b' . preg_quote(TABLE_PRODUCTS_DESCRIPTION, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
+        // --- 2. PRÄZISE PRÜFUNG & ALIAS-ERKENNUNG FÜR PRODUKT-BESCHREIBUNGEN ---
+        $tablePdName = defined('TABLE_PRODUCTS_DESCRIPTION') ? TABLE_PRODUCTS_DESCRIPTION : 'products_description';
+        $pdFromJoinPattern = '/\b(from|join)\s+' . preg_quote($tablePdName, '/') . '\b/i';
+
+        if (preg_match($pdFromJoinPattern, $query) && !empty($pDescriptionFilter)) {
+            
+            $pdAliasPattern = '/\b' . preg_quote($tablePdName, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
+            
             if (preg_match($pdAliasPattern, $query, $pdMatches)) {
-                $actualPdAlias = $pdMatches[1];
-                $dynamicPdFilter = str_replace('pd.', $actualPdAlias . '.', $pDescriptionFilter);
+                $forbiddenKeywords = ['where', 'join', 'on', 'group', 'order', 'limit', 'left', 'right', 'inner'];
+                if (in_array(strtolower($pdMatches[1]), $forbiddenKeywords)) {
+                    $actualPdAlias = $tablePdName;
+                } else {
+                    $actualPdAlias = $pdMatches[1]; // Meistens "pd"
+                }
             } else {
-                $dynamicPdFilter = str_replace('pd.', TABLE_PRODUCTS_DESCRIPTION . '.', $pDescriptionFilter);
+                $actualPdAlias = $tablePdName;
             }
+
+            // Ersetzt das standardmäßige "pd." durch den dynamisch ermittelten Alias
+            $dynamicPdFilter = str_replace('pd.', $actualPdAlias . '.', $pDescriptionFilter);
 
             if (strpos($lowerQuery, ' where ') !== false) {
                 $query = preg_replace('/ where /i', ' WHERE 1=1 ' . $dynamicPdFilter . ' AND ', $query);
@@ -273,6 +251,10 @@ class MultistoreQueryParser {
 
         return $query;
     }
+
+    
+}
+ 
 
 /**
  * Globaler Wrapper (ms_db_query)
