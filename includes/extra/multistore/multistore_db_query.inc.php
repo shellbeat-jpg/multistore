@@ -162,68 +162,79 @@ class MultistoreQueryParser {
     }
 
     /**
-     * Injiziert Multistore-Bedingungen unter strikter Berücksichtigung von FROM/JOIN-Klauseln, Wortgrenzen, Subqueries und Klammer-Ebenen
+     * Injiziert Multistore-Bedingungen unter strikter Berücksichtigung von Subqueries und Join-Klammern
      */
     private function injectMultistoreFilters($query) {
-        // Falls keine Klammern existieren (flache Query), direkt verarbeiten
+        // Speicher für maskierte Blöcke initialisieren
+        $this->maskedBlocks = [];
+
+        // Falls keine Klammern existieren, direkt verarbeiten
         if (strpos($query, '(') === false) {
             return $this->injectFiltersToSingleScope($query);
         }
 
-        // STRATEGIE: Wir isolieren Subqueries von innen nach außen mithilfe eines Regex,
-        // der den Inhalt der innersten runden Klammern matcht, filtert und schrittweise wieder zusammensetzt.
-        // Das verhindert, dass Filter in den falschen Query-Scope (Ebene) rutschen.
-        
         $executionCount = 0;
-        $maxLoops = 10; // Sicherheitsanker gegen Endlosschleifen bei defektem SQL
+        $maxLoops = 15; // Erhöht für tiefer verschachtelte Queries
 
+        // STRATEGIE: Wir arbeiten uns von den innersten Klammern nach außen vor
         while (preg_match('/\(([^()]+)\)/i', $query, $matches, PREG_OFFSET_CAPTURE) && $executionCount < $maxLoops) {
             $executionCount++;
             
             $innerSql = $matches[1][0];
-            $startOffset = $matches[0][1];
-            $length = strlen($matches[0][0]);
+            $startOffset = $matches[0][1]; // Exakter Startpunkt inkl. der Klammer (
+            $length = strlen($matches[0][0]); // Gesamtlänge inkl. Klammern ()
 
-            // Nur verarbeiten, wenn es sich um eine valide Subquery handelt (enthält ein SELECT)
-            if (strpos(strtolower($innerSql), 'select ') !== false) {
+            // Handelt es sich um eine echte Subquery (enthält SELECT)?
+            if (preg_match('/\bselect\b/i', $innerSql)) {
                 $processedInnerSql = $this->injectFiltersToSingleScope($innerSql);
-                // Ersetze die innerste Query temporär durch einen modifizierten Platzhalter
+                // Subquery verarbeitet zurückschreiben (Klammern bleiben erhalten)
                 $query = substr_replace($query, '(' . $processedInnerSql . ')', $startOffset, $length);
             } else {
-                // Keine Subquery (z. B. IN-Liste oder Funktionsaufruf wie IFNULL) -> temporär maskieren,
-                // damit der Regex in der Schleife zur nächsten Ebene wandern kann
-                $maskPlaceholder = '___MASKED_BLOCK_' . md5($innerSql) . '___';
-                if (!isset($this->maskedBlocks)) {
-                    $this->maskedBlocks = [];
-                }
+                // Keine Subquery (Join-Priorisierung, IN-Liste, Funktion wie IFNULL)
+                // Wir maskieren den Block absolut neutral über eine ID
+                $maskPlaceholder = '___MASKED_BLOCK_' . md5($innerSql . $startOffset) . '___';
                 $this->maskedBlocks[$maskPlaceholder] = $innerSql;
-                $query = substr_replace($query, '[' . $maskPlaceholder . ']', $startOffset, $length);
+                
+                // Wir ersetzen den Block im String temporär durch den Platzhalter (OHNE Klammern, um die Schleife zu füttern)
+                $query = substr_replace($query, $maskPlaceholder, $startOffset, $length);
             }
         }
 
-        // Jetzt verarbeiten wir den verbliebenen äußeren Haupt-Scope
+        // Jetzt verarbeiten wir den verbliebenen, äußeren Haupt-Scope
         $query = $this->injectFiltersToSingleScope($query);
 
-        // Demaskierung: Alle temporär geschützten Funktionsblöcke wieder in echte Klammern zurückwandeln
+        // 💡 DIE WICHTIGE KORREKTUR: Demaskierung stellt den Originalzustand 1:1 wieder her
         if (!empty($this->maskedBlocks)) {
-            foreach ($this->maskedBlocks as $placeholder => $originalInner) {
-                $query = str_replace('[' . $placeholder . ']', '(' . $originalInner . ')', $query);
+            // Wir müssen die Ersetzung ggf. mehrmals durchlaufen, falls Platzhalter verschachtelt wurden
+            $demaskLoop = 0;
+            while (strpos($query, '___MASKED_BLOCK_') !== false && $demaskLoop < 10) {
+                $demaskLoop++;
+                foreach ($this->maskedBlocks as $placeholder => $originalInner) {
+                    // Wir setzen den Inhalt exakt wieder in seine originalen runden Klammern ()
+                    $query = str_replace($placeholder, '(' . $originalInner . ')', $query);
+                }
             }
-            $this->maskedBlocks = []; // Zurücksetzen für nachfolgende Queries
+            $this->maskedBlocks = []; // Speicher leeren
         }
 
         return $query;
     }
 
     /**
-     * Hilfsfunktion: Filtert isoliert exakt EINE Query-Ebene (Scope) ohne Subquery-Konflikte
+     * Hilfsfunktion: Filtert isoliert exakt EINE Query-Ebene (Scope)
      */
     private function injectFiltersToSingleScope($query) {
         $lowerQuery = strtolower($query);
+        
+        // Ignoriere den Block komplett, wenn er nur noch aus einem Maskierungs-String besteht
+        if (preg_match('/^___masked_block_[a-z0-9]+___$/i', trim($query))) {
+            return $query;
+        }
+
         $pDescriptionFilter = defined('MULTISTORE_SQL_PDESCRIPTION') ? MULTISTORE_SQL_PDESCRIPTION : '';
         $injectionPointPattern = '/\s+(group\s+by|order\s+by|limit)\b/i';
 
-        // 1. Hole den FROM/JOIN-Bereich dieser spezifischen Ebene
+        // FROM-Block dieser Ebene isolieren (beachtet auch maskierte Platzhalter)
         $fromBlock = '';
         if (preg_match('/(?:\bfrom\b\s+)(.*?)(?=\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/i', $query, $fromMatches)) {
             $fromBlock = $fromMatches[1];
@@ -233,19 +244,34 @@ class MultistoreQueryParser {
             }
         }
 
-        if (empty($fromBlock)) {
+        // Falls wir im FROM-Block Platzhalter haben, demaskieren wir diesen temporär NUR für die Tabellen-Prüfung
+        $checkFromBlock = $fromBlock;
+        if (!empty($this->maskedBlocks)) {
+            foreach ($this->maskedBlocks as $placeholder => $originalInner) {
+                $checkFromBlock = str_replace($placeholder, $originalInner, $checkFromBlock);
+            }
+        }
+
+        if (empty($checkFromBlock)) {
             return $query;
         }
 
-        // --- A. KATEGORIEN-FILTER (Lokalisierter Scope) ---
+        // --- A. KATEGORIEN-FILTER ---
         $tableCategoriesName = defined('TABLE_CATEGORIES') ? TABLE_CATEGORIES : 'categories';
-        if (preg_match('/\b' . preg_quote($tableCategoriesName, '/') . '\b/i', $fromBlock)) {
+        if (preg_match('/\b' . preg_quote($tableCategoriesName, '/') . '\b/i', $checkFromBlock)) {
+            
+            // 💡 PRÜFUNG: Wenn der Multistore-Filter bereits in der Query existiert, überspringen!
+            // Das verhindert doppelte Injektionen bei Core-Queries, die den Filter schon mitbringen.
+            if (strpos($lowerQuery, 'c.string_domains') !== false || strpos($lowerQuery, $tableCategoriesName . '.string_domains') !== false) {
+                return $query; 
+            }
+
             $baseFilter = defined('MULTISTORE_SQL_SEARCH_WHERE2a') ? MULTISTORE_SQL_SEARCH_WHERE2a : '';
             $aliasPattern = '/\b' . preg_quote($tableCategoriesName, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
             
-            if (preg_match($aliasPattern, $fromBlock, $matches)) {
-                $forbiddenKeywords = ['join', 'on', 'left', 'right', 'inner', 'straight_join'];
-                if (in_array(strtolower($matches[1]), $forbiddenKeywords) || strpos($fromBlock, ',' . $matches[1]) !== false) {
+            if (preg_match($aliasPattern, $checkFromBlock, $matches)) {
+                $forbiddenKeywords = ['join', 'on', 'left', 'right', 'inner', 'straight_join', 'where'];
+                if (in_array(strtolower($matches[1]), $forbiddenKeywords) || strpos($checkFromBlock, ',' . $matches[1]) !== false) {
                     $actualAlias = $tableCategoriesName;
                 } else {
                     $actualAlias = $matches[1];
@@ -274,16 +300,20 @@ class MultistoreQueryParser {
             }
         }
 
-        // Update der temporären Variable, falls Modifikationen stattfanden
         $lowerQuery = strtolower($query);
 
-        // --- B. PRODUKT-BESCHREIBUNGEN-FILTER (Lokalisierter Scope) ---
+        // --- B. PRODUKT-BESCHREIBUNGEN-FILTER ---
         $tablePdName = defined('TABLE_PRODUCTS_DESCRIPTION') ? TABLE_PRODUCTS_DESCRIPTION : 'products_description';
-        if (preg_match('/\b' . preg_quote($tablePdName, '/') . '\b/i', $fromBlock) && !empty($pDescriptionFilter)) {
+        if (preg_match('/\b' . preg_quote($tablePdName, '/') . '\b/i', $checkFromBlock) && !empty($pDescriptionFilter)) {
+            
+            if (strpos($lowerQuery, 'pd.products_name') !== false || strpos($lowerQuery, $tablePdName . '.products_name') !== false) {
+                return $query;
+            }
+
             $pdAliasPattern = '/\b' . preg_quote($tablePdName, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
             
-            if (preg_match($pdAliasPattern, $fromBlock, $pdMatches)) {
-                $forbiddenKeywords = ['join', 'on', 'left', 'right', 'inner'];
+            if (preg_match($pdAliasPattern, $checkFromBlock, $pdMatches)) {
+                $forbiddenKeywords = ['join', 'on', 'left', 'right', 'inner', 'where'];
                 if (in_array(strtolower($pdMatches[1]), $forbiddenKeywords)) {
                     $actualPdAlias = $tablePdName;
                 } else {
