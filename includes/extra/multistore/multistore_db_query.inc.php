@@ -161,7 +161,7 @@ class MultistoreQueryParser {
         return str_ireplace(array_keys($replacements), array_values($replacements), $query);
     }
 
-    private function injectMultistoreFilters($query) {
+    private function injectMultistoreFilters_old($query) {
         $lowerQuery = strtolower($query);
         $filter2a = defined('MULTISTORE_SQL_SEARCH_WHERE2a') ? MULTISTORE_SQL_SEARCH_WHERE2a : '';
         $pDescriptionFilter = defined('MULTISTORE_SQL_PDESCRIPTION') ? MULTISTORE_SQL_PDESCRIPTION : '';
@@ -199,6 +199,80 @@ class MultistoreQueryParser {
         return $query;
     }
 }
+    /**
+     * Injiziert Multistore-Bedingungen unter Berücksichtigung dynamischer Tabellen-Aliase
+     */
+    private function injectMultistoreFilters($query) {
+        $lowerQuery = strtolower($query);
+        $pDescriptionFilter = defined('MULTISTORE_SQL_PDESCRIPTION') ? MULTISTORE_SQL_PDESCRIPTION : '';
+        $injectionPointPattern = '/\s+(group\s+by|order\s+by|limit)\b/i';
+        
+        // --- 1. DYNAMISCHE ALIAS-ERKENNUNG FÜR KATEGORIEN ---
+        if (strpos($lowerQuery, TABLE_CATEGORIES) !== false) {
+            
+            // Standard-Filter holen (enthält im Original hartcodiert "c.string_domains")
+            $baseFilter = defined('MULTISTORE_SQL_SEARCH_WHERE2a') ? MULTISTORE_SQL_SEARCH_WHERE2a : '';
+            
+            // Regex sucht nach: Tabellenname gefolgt von optionalem "AS" und dem Alias-Namen
+            // Beispiel-Treffer: "categories c", "categories cat", "categories AS c"
+            $aliasPattern = '/\b' . preg_quote(TABLE_CATEGORIES, '/') . '\s+(?:as\s+)?([a-z0-0_]+)\b/i';
+            
+            if (preg_match($aliasPattern, $query, $matches)) {
+                $actualAlias = $matches[1]; // Der gefundene Alias (z. B. "cat" oder "c2")
+            } else {
+                $actualAlias = TABLE_CATEGORIES; // Kein Alias gefunden -> Nutze vollen Tabellennamen
+            }
+
+            // Wir passen den Filter dynamisch an den gefundenen Alias an!
+            // Ersetzt "c.string_domains" durch den tatsächlichen Alias (z. B. "categories.string_domains")
+            $dynamicFilter = str_replace('c.string_domains', $actualAlias . '.string_domains', $baseFilter);
+
+            if (!empty($dynamicFilter)) {
+                // Sicherstellen, dass DISTINCT gesetzt ist, um Duplikate durch Joins zu vermeiden
+                if (strpos($lowerQuery, 'select distinct') === false) {
+                    $query = preg_replace('/^select /i', 'SELECT DISTINCT ', $query);
+                }
+
+                if (strpos($lowerQuery, ' where ') !== false) {
+                    // Wenn ein WHERE existiert, hängen wir uns direkt per AND an den Anfang des WHERE-Blocks
+                    $query = preg_replace('/ where /i', ' WHERE 1=1 ' . $dynamicFilter . ' AND ', $query);
+                } else {
+                    // Wenn kein WHERE existiert, erzeugen wir eines vor Steuerungsblöcken (GROUP BY etc.)
+                    if (preg_match($injectionPointPattern, $query, $matches, PREG_OFFSET_CAPTURE)) {
+                        $offset = $matches[0][1];
+                        $query = substr($query, 0, $offset) . ' WHERE 1=1 ' . $dynamicFilter . ' ' . substr($query, $offset);
+                    } else {
+                        $query .= ' WHERE 1=1 ' . $dynamicFilter;
+                    }
+                }
+            }
+        }
+
+        // --- 2. PRODUKT-BESCHREIBUNGEN FILTER (PRODUKTIV-BESTAND) ---
+        if (strpos($lowerQuery, TABLE_PRODUCTS_DESCRIPTION) !== false && !empty($pDescriptionFilter)) {
+            // Hier analog prüfen, falls auch "pd" mal abweicht (Standard bei modified ist fast immer "pd")
+            $pdAliasPattern = '/\b' . preg_quote(TABLE_PRODUCTS_DESCRIPTION, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
+            if (preg_match($pdAliasPattern, $query, $pdMatches)) {
+                $actualPdAlias = $pdMatches[1];
+                $dynamicPdFilter = str_replace('pd.', $actualPdAlias . '.', $pDescriptionFilter);
+            } else {
+                $dynamicPdFilter = str_replace('pd.', TABLE_PRODUCTS_DESCRIPTION . '.', $pDescriptionFilter);
+            }
+
+            if (strpos($lowerQuery, ' where ') !== false) {
+                $query = preg_replace('/ where /i', ' WHERE 1=1 ' . $dynamicPdFilter . ' AND ', $query);
+            } else {
+                if (preg_match($injectionPointPattern, $query, $matches, PREG_OFFSET_CAPTURE)) {
+                    $offset = $matches[0][1];
+                    $query = substr($query, 0, $offset) . ' WHERE 1=1 ' . $dynamicPdFilter . ' ' . substr($query, $offset);
+                } else {
+                    $query .= ' WHERE 1=1 ' . $dynamicPdFilter;
+                }
+            }
+        }
+
+        return $query;
+    }
 
 /**
  * Globaler Wrapper (ms_db_query)
