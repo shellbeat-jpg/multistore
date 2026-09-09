@@ -162,43 +162,102 @@ class MultistoreQueryParser {
     }
 
     /**
-     * Injiziert Multistore-Bedingungen unter strikter Berücksichtigung von FROM/JOIN-Klauseln und Wortgrenzen
+     * Injiziert Multistore-Bedingungen unter strikter Berücksichtigung von FROM/JOIN-Klauseln, Wortgrenzen, Subqueries und Klammer-Ebenen
      */
     private function injectMultistoreFilters($query) {
+        // Falls keine Klammern existieren (flache Query), direkt verarbeiten
+        if (strpos($query, '(') === false) {
+            return $this->injectFiltersToSingleScope($query);
+        }
+
+        // STRATEGIE: Wir isolieren Subqueries von innen nach außen mithilfe eines Regex,
+        // der den Inhalt der innersten runden Klammern matcht, filtert und schrittweise wieder zusammensetzt.
+        // Das verhindert, dass Filter in den falschen Query-Scope (Ebene) rutschen.
+        
+        $executionCount = 0;
+        $maxLoops = 10; // Sicherheitsanker gegen Endlosschleifen bei defektem SQL
+
+        while (preg_match('/\(([^()]+)\)/i', $query, $matches, PREG_OFFSET_CAPTURE) && $executionCount < $maxLoops) {
+            $executionCount++;
+            
+            $innerSql = $matches[1][0];
+            $startOffset = $matches[0][1];
+            $length = strlen($matches[0][0]);
+
+            // Nur verarbeiten, wenn es sich um eine valide Subquery handelt (enthält ein SELECT)
+            if (strpos(strtolower($innerSql), 'select ') !== false) {
+                $processedInnerSql = $this->injectFiltersToSingleScope($innerSql);
+                // Ersetze die innerste Query temporär durch einen modifizierten Platzhalter
+                $query = substr_replace($query, '(' . $processedInnerSql . ')', $startOffset, $length);
+            } else {
+                // Keine Subquery (z. B. IN-Liste oder Funktionsaufruf wie IFNULL) -> temporär maskieren,
+                // damit der Regex in der Schleife zur nächsten Ebene wandern kann
+                $maskPlaceholder = '___MASKED_BLOCK_' . md5($innerSql) . '___';
+                if (!isset($this->maskedBlocks)) {
+                    $this->maskedBlocks = [];
+                }
+                $this->maskedBlocks[$maskPlaceholder] = $innerSql;
+                $query = substr_replace($query, '[' . $maskPlaceholder . ']', $startOffset, $length);
+            }
+        }
+
+        // Jetzt verarbeiten wir den verbliebenen äußeren Haupt-Scope
+        $query = $this->injectFiltersToSingleScope($query);
+
+        // Demaskierung: Alle temporär geschützten Funktionsblöcke wieder in echte Klammern zurückwandeln
+        if (!empty($this->maskedBlocks)) {
+            foreach ($this->maskedBlocks as $placeholder => $originalInner) {
+                $query = str_replace('[' . $placeholder . ']', '(' . $originalInner . ')', $query);
+            }
+            $this->maskedBlocks = []; // Zurücksetzen für nachfolgende Queries
+        }
+
+        return $query;
+    }
+
+    /**
+     * Hilfsfunktion: Filtert isoliert exakt EINE Query-Ebene (Scope) ohne Subquery-Konflikte
+     */
+    private function injectFiltersToSingleScope($query) {
         $lowerQuery = strtolower($query);
         $pDescriptionFilter = defined('MULTISTORE_SQL_PDESCRIPTION') ? MULTISTORE_SQL_PDESCRIPTION : '';
         $injectionPointPattern = '/\s+(group\s+by|order\s+by|limit)\b/i';
-        
-        // --- 1. PRÄZISE PRÜFUNG & ALIAS-ERKENNUNG FÜR KATEGORIEN ---
-        // Der Regex stellt sicher: Es MUSS ein 'FROM' oder 'JOIN' vor dem Tabellennamen stehen.
-        // \b verhindert das Match von 'categories_id' oder 'categories_description'.
-        $tableCategoriesName = defined('TABLE_CATEGORIES') ? TABLE_CATEGORIES : 'categories';
-        $fromJoinPattern = '/\b(from|join)\s+' . preg_quote($tableCategoriesName, '/') . '\b/i';
 
-        if (preg_match($fromJoinPattern, $query)) {
-            
+        // 1. Hole den FROM/JOIN-Bereich dieser spezifischen Ebene
+        $fromBlock = '';
+        if (preg_match('/(?:\bfrom\b\s+)(.*?)(?=\bwhere\b|\bgroup\s+by\b|\border\s+by\b|\blimit\b|$)/i', $query, $fromMatches)) {
+            $fromBlock = $fromMatches[1];
+        } else {
+            if (preg_match('/(?:\bfrom\b\s+)(.*)/i', $query, $fromMatches)) {
+                $fromBlock = $fromMatches[1];
+            }
+        }
+
+        if (empty($fromBlock)) {
+            return $query;
+        }
+
+        // --- A. KATEGORIEN-FILTER (Lokalisierter Scope) ---
+        $tableCategoriesName = defined('TABLE_CATEGORIES') ? TABLE_CATEGORIES : 'categories';
+        if (preg_match('/\b' . preg_quote($tableCategoriesName, '/') . '\b/i', $fromBlock)) {
             $baseFilter = defined('MULTISTORE_SQL_SEARCH_WHERE2a') ? MULTISTORE_SQL_SEARCH_WHERE2a : '';
-            
-            // Holt den exakten Alias direkt hinter dem echten Tabellennamen (z.B. "FROM categories c" oder "FROM categories AS cat")
             $aliasPattern = '/\b' . preg_quote($tableCategoriesName, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
             
-            if (preg_match($aliasPattern, $query, $matches)) {
-                // Falls das nächste Wort ein SQL-Schlüsselwort wie WHERE, JOIN, ON ist, gibt es keinen Alias
-                $forbiddenKeywords = ['where', 'join', 'on', 'group', 'order', 'limit', 'left', 'right', 'inner'];
-                if (in_array(strtolower($matches[1]), $forbiddenKeywords)) {
+            if (preg_match($aliasPattern, $fromBlock, $matches)) {
+                $forbiddenKeywords = ['join', 'on', 'left', 'right', 'inner', 'straight_join'];
+                if (in_array(strtolower($matches[1]), $forbiddenKeywords) || strpos($fromBlock, ',' . $matches[1]) !== false) {
                     $actualAlias = $tableCategoriesName;
                 } else {
-                    $actualAlias = $matches[1]; // Gefundener Alias (z.B. "c")
+                    $actualAlias = $matches[1];
                 }
             } else {
-                $actualAlias = $tableCategoriesName; // Kein Alias definiert
+                $actualAlias = $tableCategoriesName;
             }
 
-            // Wir passen den Filter dynamisch an den isolierten Alias an
             $dynamicFilter = str_replace('c.string_domains', $actualAlias . '.string_domains', $baseFilter);
 
             if (!empty($dynamicFilter)) {
-                if (strpos($lowerQuery, 'select distinct') === false) {
+                if (strpos($lowerQuery, 'select distinct') === false && strpos($lowerQuery, 'select ') === 0) {
                     $query = preg_replace('/^select /i', 'SELECT DISTINCT ', $query);
                 }
 
@@ -215,26 +274,25 @@ class MultistoreQueryParser {
             }
         }
 
-        // --- 2. PRÄZISE PRÜFUNG & ALIAS-ERKENNUNG FÜR PRODUKT-BESCHREIBUNGEN ---
-        $tablePdName = defined('TABLE_PRODUCTS_DESCRIPTION') ? TABLE_PRODUCTS_DESCRIPTION : 'products_description';
-        $pdFromJoinPattern = '/\b(from|join)\s+' . preg_quote($tablePdName, '/') . '\b/i';
+        // Update der temporären Variable, falls Modifikationen stattfanden
+        $lowerQuery = strtolower($query);
 
-        if (preg_match($pdFromJoinPattern, $query) && !empty($pDescriptionFilter)) {
-            
+        // --- B. PRODUKT-BESCHREIBUNGEN-FILTER (Lokalisierter Scope) ---
+        $tablePdName = defined('TABLE_PRODUCTS_DESCRIPTION') ? TABLE_PRODUCTS_DESCRIPTION : 'products_description';
+        if (preg_match('/\b' . preg_quote($tablePdName, '/') . '\b/i', $fromBlock) && !empty($pDescriptionFilter)) {
             $pdAliasPattern = '/\b' . preg_quote($tablePdName, '/') . '\s+(?:as\s+)?([a-z0-9_]+)\b/i';
             
-            if (preg_match($pdAliasPattern, $query, $pdMatches)) {
-                $forbiddenKeywords = ['where', 'join', 'on', 'group', 'order', 'limit', 'left', 'right', 'inner'];
+            if (preg_match($pdAliasPattern, $fromBlock, $pdMatches)) {
+                $forbiddenKeywords = ['join', 'on', 'left', 'right', 'inner'];
                 if (in_array(strtolower($pdMatches[1]), $forbiddenKeywords)) {
                     $actualPdAlias = $tablePdName;
                 } else {
-                    $actualPdAlias = $pdMatches[1]; // Meistens "pd"
+                    $actualPdAlias = $pdMatches[1];
                 }
             } else {
                 $actualPdAlias = $tablePdName;
             }
 
-            // Ersetzt das standardmäßige "pd." durch den dynamisch ermittelten Alias
             $dynamicPdFilter = str_replace('pd.', $actualPdAlias . '.', $pDescriptionFilter);
 
             if (strpos($lowerQuery, ' where ') !== false) {
@@ -251,6 +309,7 @@ class MultistoreQueryParser {
 
         return $query;
     }
+    
 
     
 }
